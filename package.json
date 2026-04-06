@@ -1,0 +1,22 @@
+{
+  "name": "kash-rundown",
+  "version": "1.0.0",
+  "description": "Kash Rundown — Burst/Crash Game",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "author": "Samsa Productions SAS",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@types/howler": "^2.2.12",
+    "howler": "^2.2.4",
+    "pixi-filters": "^6.1.5",
+    "pixi.js": "^8.17.1",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.5"
+  }
+}
