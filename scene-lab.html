@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KASH — Scene Lab</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'Barlow Condensed', sans-serif;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Canvas area — centered with padding from edges */
+  #canvas-wrap {
+    height: 95dvh;
+    aspect-ratio: 390 / 844;
+    flex-shrink: 0;
+    position: relative;
+    border: 1px solid #333;
+    border-radius: 12px;
+    overflow: hidden;
+    margin: auto 0 auto 24px;
+  }
+  #pixi-container { width: 100%; height: 100%; }
+  #pixi-container canvas { width: 100% !important; height: 100% !important; }
+
+  /* Grid overlay */
+  #grid-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: none;
+  }
+  #grid-overlay.grid-visible { display: block; }
+  .grid-line {
+    position: absolute;
+    background: rgba(220,20,60,0.6);
+  }
+  .grid-v { width: 1px; top: 0; bottom: 0; }
+  .grid-h { height: 1px; left: 0; right: 0; }
+
+  /* UI zone overlays */
+  #ui-zones {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: none;
+  }
+  #ui-zones.zones-visible { display: block; }
+  .ui-zone {
+    position: absolute;
+    left: 0; right: 0;
+    border: 1px dashed rgba(255,255,255,0.5);
+    background: rgba(234,88,12,0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  /* top-bar: padding 12px top + ~18px text + 8px bottom ≈ 38px → 4.5% of 844 */
+  .zone-top-bar     { top: 0; height: 4.5%; background: rgba(234,88,12,0.15); }
+  /* phase-bar: padding 5px + 9px text + 5px ≈ 22px → 2.6% */
+  .zone-phase-bar   { top: 4.5%; height: 2.6%; background: rgba(37,99,235,0.15); }
+  /* stats-row: padding 6px + card ~30px + 6px ≈ 45px → 5.3% */
+  .zone-stats-row   { top: 7.1%; height: 5.3%; background: rgba(123,47,190,0.15); }
+  /* multiplier: top 120px → 14.2%, height ~100px → 11.8% */
+  .zone-multiplier  { top: 14.2%; height: 11.8%; background: rgba(22,163,74,0.15); border-style: dashed; }
+  /* kash-quote: top 220px → 26%, height ~45px → 5.3% */
+  .zone-kash-quote  { top: 26%; height: 5.3%; background: rgba(234,184,8,0.15); }
+  /* bottom section: ~250px from bottom → 29.6% */
+  .zone-bottom      { bottom: 0; height: 29.6%; background: rgba(239,68,68,0.15); }
+
+  /* Controls panel */
+  #controls {
+    flex: 1;
+    padding: 24px 32px;
+    overflow-y: auto;
+    max-width: 500px;
+  }
+  #controls h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #EA580C;
+    margin-bottom: 4px;
+  }
+  #controls .subtitle {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 24px;
+  }
+
+  .section {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: #141414;
+    border-radius: 8px;
+    border: 1px solid #222;
+  }
+  .section h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #888;
+    margin-bottom: 12px;
+  }
+
+  .control-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .control-row label {
+    font-size: 13px;
+    min-width: 110px;
+    color: #aaa;
+  }
+  .control-row input[type="range"] {
+    flex: 1;
+    accent-color: #EA580C;
+  }
+  .control-row .val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    min-width: 60px;
+    text-align: right;
+    color: #EA580C;
+  }
+
+  .phase-btns {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .phase-btns button {
+    padding: 8px 14px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: #1a1a1a;
+    color: #ccc;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .phase-btns button:hover { border-color: #EA580C; color: #fff; }
+  .phase-btns button.active {
+    background: #EA580C;
+    color: #fff;
+    border-color: #EA580C;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .toggle-row label { font-size: 13px; color: #aaa; min-width: 130px; }
+  .toggle-row input[type="checkbox"] { accent-color: #EA580C; width: 16px; height: 16px; }
+
+  .action-btns {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .action-btns button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-orange { background: #EA580C; color: #fff; }
+  .btn-green { background: #16A34A; color: #fff; }
+  .btn-red { background: #EF4444; color: #fff; }
+  .btn-purple { background: #7B2FBE; color: #fff; }
+  .btn-blue { background: #2563eb; color: #fff; }
+  .action-btns button:hover { opacity: 0.85; }
+
+  #state-display {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #555;
+    padding: 10px;
+    background: #0d0d0d;
+    border-radius: 6px;
+    white-space: pre;
+    line-height: 1.5;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <div id="pixi-container"></div>
+  <!-- Grid overlay -->
+  <div id="grid-overlay">
+    <div class="grid-line grid-v" style="left: 33.33%"></div>
+    <div class="grid-line grid-v" style="left: 66.66%"></div>
+    <div class="grid-line grid-h" style="top: 33.33%"></div>
+    <div class="grid-line grid-h" style="top: 66.66%"></div>
+  </div>
+
+  <!-- UI zone overlays -->
+  <div id="ui-zones" class="zones-visible">
+    <div class="ui-zone zone-top-bar">TOP BAR</div>
+    <div class="ui-zone zone-phase-bar">PHASE BAR</div>
+    <div class="ui-zone zone-stats-row">STATS ROW</div>
+    <div class="ui-zone zone-multiplier">MULTIPLIER</div>
+    <div class="ui-zone zone-kash-quote">KASH QUOTE</div>
+    <div class="ui-zone zone-bottom">BOTTOM (history + bet)</div>
+  </div>
+</div>
+
+<div id="controls">
+  <h1>KASH SCENE LAB</h1>
+  <p class="subtitle">Adjust graphics in real-time without playing</p>
+
+  <!-- UI zones toggle -->
+  <div class="section">
+    <h2>UI Zones</h2>
+    <div class="toggle-row">
+      <label>Show grid</label>
+      <input type="checkbox" id="toggle-grid" checked>
+    </div>
+    <div class="toggle-row">
+      <label>Show UI zones</label>
+      <input type="checkbox" id="toggle-zones" checked>
+    </div>
+  </div>
+
+  <!-- Phase select -->
+  <div class="section">
+    <h2>Chase Phase</h2>
+    <div class="phase-btns" id="phase-btns">
+      <button data-phase="1" class="active">1 — Clean Run</button>
+      <button data-phase="2">2 — Siren</button>
+      <button data-phase="3">3 — Chopper</button>
+      <button data-phase="4">4 — Pursuit</button>
+      <button data-phase="5">5 — Ghost</button>
+    </div>
+  </div>
+
+  <!-- Multiplier -->
+  <div class="section">
+    <h2>Multiplier</h2>
+    <div class="control-row">
+      <label>Multiplier</label>
+      <input type="range" id="mult-slider" min="1" max="1000" step="0.1" value="1">
+      <span class="val" id="mult-val">1.00×</span>
+    </div>
+  </div>
+
+  <!-- Toggles -->
+  <div class="section">
+    <h2>Scene Flags</h2>
+    <div class="toggle-row">
+      <label>Helicopter active</label>
+      <input type="checkbox" id="toggle-heli">
+    </div>
+    <div class="toggle-row">
+      <label>Ghost mode</label>
+      <input type="checkbox" id="toggle-ghost">
+    </div>
+    <div class="toggle-row">
+      <label>Roadblock active</label>
+      <input type="checkbox" id="toggle-roadblock">
+    </div>
+  </div>
+
+  <!-- Spawn actions -->
+  <div class="section">
+    <h2>Spawn Objects</h2>
+    <div class="action-btns">
+      <button class="btn-red" id="spawn-car">Car</button>
+      <button class="btn-orange" id="spawn-barricade">Barricade</button>
+      <button class="btn-orange" id="spawn-spikes">Spikes</button>
+      <button class="btn-green" id="spawn-dumpster">Dumpster</button>
+      <button class="btn-orange" id="spawn-cones">Cones</button>
+      <button class="btn-blue" id="spawn-flipped">Flipped Car</button>
+      <button class="btn-blue" id="spawn-electric">Electric</button>
+      <button class="btn-purple" id="spawn-nitro">Nitro</button>
+    </div>
+    <div class="action-btns" style="margin-top:6px">
+      <button class="btn-red" id="spawn-crash">Crash Particles</button>
+      <button class="btn-purple" id="clear-objects">Clear All</button>
+    </div>
+  </div>
+
+  <!-- Game phase -->
+  <div class="section">
+    <h2>Game Phase</h2>
+    <div class="phase-btns" id="game-phase-btns">
+      <button data-gphase="IDLE">IDLE</button>
+      <button data-gphase="RUNNING" class="active">RUNNING</button>
+      <button data-gphase="CRASHED">CRASHED</button>
+      <button data-gphase="CASHED_OUT">CASHED_OUT</button>
+    </div>
+  </div>
+
+  <!-- Live state -->
+  <div class="section">
+    <h2>Live State</h2>
+    <div id="state-display"></div>
+  </div>
+</div>
+
+<script type="module" src="/src/scene-lab.ts"></script>
+</body>
+</html>

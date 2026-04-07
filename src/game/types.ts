@@ -9,7 +9,7 @@ export interface HistoryEntry {
 }
 
 export interface Obstacle {
-  type: 'car' | 'police' | 'civilian' | 'cyclist';
+  type: 'car' | 'police' | 'civilian' | 'cyclist' | 'barricade' | 'spikes' | 'dumpster' | 'cones' | 'flipped_car' | 'electric_puddle';
   rx: number;
   rz: number;
   speed: number;
