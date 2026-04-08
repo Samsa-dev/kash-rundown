@@ -80,11 +80,6 @@ async function init() {
     });
   });
 
-  // Audio — also init on any click if not already
-  const initAudioOnce = () => { Audio.initAudio(); document.removeEventListener('click', initAudioOnce); document.removeEventListener('touchstart', initAudioOnce); };
-  document.addEventListener('click', initAudioOnce);
-  document.addEventListener('touchstart', initAudioOnce);
-
   $('mute-btn').addEventListener('click', () => {
     const m = Audio.toggleMute();
     $('mute-btn').textContent = m ? '🔇' : '🔊';
