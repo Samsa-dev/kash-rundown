@@ -8,7 +8,6 @@ type MessageHandler = (msg: ServerMessage) => void;
 export class GameClient {
   private ws: WebSocket | null = null;
   private handlers = new Map<string, MessageHandler[]>();
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private url: string;
   public connected = false;
   public offline = false;
@@ -19,28 +18,36 @@ export class GameClient {
 
   connect(): Promise<void> {
     return new Promise((resolve) => {
-      try {
-        this.ws = new WebSocket(this.url);
-      } catch {
-        console.log('[GameClient] WebSocket not available, going offline');
+      // If no URL or empty, go offline immediately
+      if (!this.url || this.url === 'ws://:3001' || this.url === 'wss://:3001') {
+        console.log('[GameClient] No server URL, going offline');
         this.offline = true;
         resolve();
         return;
       }
 
-      const timeout = setTimeout(() => {
-        console.log('[GameClient] Connection timeout, going offline');
-        this.offline = true;
-        this.ws?.close();
+      let resolved = false;
+      const done = (online: boolean) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeout);
+        this.offline = !online;
+        this.connected = online;
+        console.log(`[GameClient] ${online ? 'Connected' : 'Offline mode'}`);
         resolve();
-      }, 3000);
+      };
+
+      const timeout = setTimeout(() => done(false), 3000);
+
+      try {
+        this.ws = new WebSocket(this.url);
+      } catch {
+        done(false);
+        return;
+      }
 
       this.ws.onopen = () => {
-        clearTimeout(timeout);
-        this.connected = true;
-        this.offline = false;
-        console.log('[GameClient] Connected');
-        resolve();
+        done(true);
       };
 
       this.ws.onmessage = (event) => {
@@ -57,19 +64,17 @@ export class GameClient {
 
       this.ws.onclose = () => {
         this.connected = false;
-        if (!this.offline) {
-          console.log('[GameClient] Disconnected, reconnecting in 2s...');
-          this.reconnectTimer = setTimeout(() => this.connect(), 2000);
+        // If we already resolved as online and then disconnected, don't go offline
+        // Just log it — the game keeps running with last state
+        if (!this.offline && resolved) {
+          console.log('[GameClient] Disconnected');
+        } else {
+          done(false);
         }
       };
 
       this.ws.onerror = () => {
-        clearTimeout(timeout);
-        if (!this.connected) {
-          console.log('[GameClient] Connection failed, going offline');
-          this.offline = true;
-          resolve();
-        }
+        done(false);
       };
     });
   }
@@ -98,7 +103,6 @@ export class GameClient {
   }
 
   disconnect(): void {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.ws?.close();
     this.ws = null;
   }
