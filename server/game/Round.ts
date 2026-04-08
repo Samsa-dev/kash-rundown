@@ -97,10 +97,21 @@ export class Round {
       usedLanes.push(availableLanes[Math.floor(Math.random() * availableLanes.length)]);
     }
 
-    // Spawn all obstacles immediately
-    for (const l of usedLanes) {
-      const type = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
-      this.events.onObstacle(type, l, 1);
+    // Chance of a wide obstacle instead of normal ones
+    const wideChance = this.chasePhase >= 3 ? 0.2 : 0;
+    if (WIDE_TYPES.length > 0 && Math.random() < wideChance) {
+      // Spawn one wide obstacle instead
+      const type = WIDE_TYPES[Math.floor(Math.random() * WIDE_TYPES.length)];
+      const lane = [-0.333, 0.333][Math.floor(Math.random() * 2)];
+      this.events.onObstacle(type, lane, 2);
+      usedLanes.length = 0;
+      usedLanes.push(lane);
+    } else {
+      // Spawn normal obstacles
+      for (const l of usedLanes) {
+        const type = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
+        this.events.onObstacle(type, l, 1);
+      }
     }
 
     // Kash only moves when in danger
