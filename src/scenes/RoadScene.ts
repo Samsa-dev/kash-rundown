@@ -871,36 +871,31 @@ export class RoadScene {
       const intensity = Math.min(1, 0.5 + phase * 0.15);
 
       const cx = W / 2;
-      const cy = H * 0.65;
+      const cy = H * 0.75;
 
-      // Left police light — red
+      // Left police light — red (gradient circles fading out)
       const leftX = cx - 80;
-      for (let r = 200; r > 0; r -= 25) {
+      for (let r = 200; r > 0; r -= 15) {
+        const fade = (r / 200);
         this.effectsBack.circle(leftX, cy, r)
-          .fill({ color: 0xEF4444, alpha: t * intensity * 0.06 });
+          .fill({ color: 0xEF4444, alpha: t * intensity * 0.03 * (1 - fade) });
       }
       this.effectsBack.circle(leftX, cy, 40)
         .fill({ color: 0xEF4444, alpha: t * intensity * 0.5 });
       this.effectsBack.circle(leftX, cy, 15)
         .fill({ color: 0xFF8888, alpha: t * intensity * 0.8 });
 
-      // Right police light — blue
+      // Right police light — blue (gradient circles fading out)
       const rightX = cx + 80;
-      for (let r = 200; r > 0; r -= 25) {
+      for (let r = 200; r > 0; r -= 15) {
+        const fade = (r / 200);
         this.effectsBack.circle(rightX, cy, r)
-          .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.06 });
+          .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.03 * (1 - fade) });
       }
       this.effectsBack.circle(rightX, cy, 40)
         .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.5 });
       this.effectsBack.circle(rightX, cy, 15)
         .fill({ color: 0x88BBFF, alpha: (1 - t) * intensity * 0.8 });
-
-      // Full width glow wash
-      const washH = 250;
-      this.effectsBack.rect(0, cy - washH / 2, W / 2, washH)
-        .fill({ color: 0xEF4444, alpha: t * intensity * 0.15 });
-      this.effectsBack.rect(W / 2, cy - washH / 2, W / 2, washH)
-        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.15 });
     }
   }
 
