@@ -15,6 +15,7 @@ export interface Obstacle {
   speed: number;
   color: string;
   lanes: number;
+  isCrash?: boolean;
 }
 
 export interface NitroItem {

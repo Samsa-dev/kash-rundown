@@ -903,11 +903,13 @@ export class RoadScene {
     this.obstacleContainer.removeChildren();
     const speed = [0.007, 0.012, 0.018, 0.026, 0.042][state.chasePhase - 1];
 
-    this.obstacles = this.obstacles.filter(o => o.rz < 1.15);
+    this.obstacles = this.obstacles.filter(o => o.rz < 0.6);
     this.obstacles.sort((a, b) => a.rz - b.rz);
 
     for (const o of this.obstacles) {
       if (state.phase === 'RUNNING' || this.serverRoundRunning) o.rz += speed * (0.2 + o.rz * 1.5);
+      // Crash obstacle stops at Kash's position
+      if (o.isCrash && o.rz >= 0.38) o.rz = 0.38;
       const { x, y, scale } = roadToScreen(o.rx, o.rz);
 
       // Try sprite-based rendering

@@ -30,41 +30,33 @@ async function init() {
   const introVideo = document.getElementById('intro-video') as HTMLVideoElement;
   const tapHint = document.getElementById('intro-tap-hint')!;
 
-  // Start intro video — needs user gesture on mobile
-  let videoPlaying = false;
-  const tryPlay = () => {
-    introVideo.play().then(() => { videoPlaying = true; }).catch(() => {
-      // Autoplay blocked — show tap hint
-      tapHint.classList.add('visible');
-    });
-  };
-  tryPlay();
+  const loadingBar = document.getElementById('intro-loading-bar')!;
+  const loadingText = document.getElementById('intro-loading-text')!;
+  const loadingWrap = document.getElementById('intro-loading')!;
 
-  // Handle tap to start video if autoplay blocked
-  const onTap = () => {
-    if (!videoPlaying) {
-      introVideo.play().then(() => { videoPlaying = true; tapHint.classList.remove('visible'); });
-    }
-    introScreen.removeEventListener('click', onTap);
-    introScreen.removeEventListener('touchstart', onTap);
-    // Also init audio on this gesture
-    Audio.initAudio();
-  };
-  introScreen.addEventListener('click', onTap);
-  introScreen.addEventListener('touchstart', onTap);
+  // Show loading bar immediately
+  loadingBar.style.width = '10%';
+  loadingText.textContent = 'Initializing...';
 
-  // Load game in background while video plays
+  // Load game assets with progress
   const app = new Application();
   await app.init({ width: W, height: H, backgroundAlpha: 0, antialias: true, resolution: window.devicePixelRatio || 1, autoDensity: true });
+  loadingBar.style.width = '25%';
 
   document.getElementById('pixi-container')!.appendChild(app.canvas);
   app.stage.addChild(roadScene.container);
+
+  loadingText.textContent = 'Loading video...';
+  await roadScene.loadVideoBackground();
+  loadingBar.style.width = '50%';
+
+  loadingText.textContent = 'Loading sprites...';
   await Promise.all([
-    roadScene.loadVideoBackground(),
     roadScene.loadObstacleSprites(),
     roadScene.loadRiderSprite(),
     initRNG(),
   ]);
+  loadingBar.style.width = '90%';
 
   // Everything runs locally — no server needed
   wireLocalMode();
@@ -103,29 +95,40 @@ async function init() {
   updateHistory();
   updateStats();
 
-  // Wait for intro video to finish, then show game
+  // ── Start video autoplay (muted, won't block) ──
+  introVideo.play().catch(() => {});
+
+  // ── Loading done — show tap hint ──
+  loadingBar.style.width = '100%';
+  loadingText.textContent = 'Ready';
+  setTimeout(() => {
+    loadingWrap.classList.remove('visible');
+    tapHint.classList.add('visible');
+  }, 400);
+
+  // ── Click/tap to skip video and start game ──
   let gameShown = false;
   const showGame = () => {
     if (gameShown) return;
     gameShown = true;
-    console.log('[Intro] Showing game');
+    Audio.initAudio();
+    introVideo.pause();
     document.getElementById('wrap')!.style.visibility = 'visible';
     introScreen.classList.add('hidden');
     setTimeout(() => introScreen.remove(), 1000);
   };
 
-  // Video ended naturally
+  introScreen.addEventListener('click', showGame);
+  introScreen.addEventListener('touchstart', showGame);
+  // If video ends naturally, also show game
   introVideo.addEventListener('ended', showGame, { once: true });
-  // Source errors don't bubble to video — listen on each source
+  // Source errors — don't get stuck
   introVideo.querySelectorAll('source').forEach(s => s.addEventListener('error', () => {
     console.warn('[Intro] Source failed:', s.src);
     showGame();
   }));
-  // Click/tap to skip once game is ready
-  introScreen.addEventListener('click', showGame);
-  introScreen.addEventListener('touchstart', showGame);
-  // Absolute fallback — never stay stuck longer than 35s
-  setTimeout(showGame, 35000);
+  // Absolute fallback
+  setTimeout(showGame, 60000);
 }
 
 // ══════════════════════════════════════
@@ -138,6 +141,8 @@ const LOCAL_OBSTACLE_LANES = [-0.667, 0, 0.667];
 const LOCAL_KASH_LANES = [-0.8, -0.05, 0.7];
 let localKashLane = -0.05;
 let localLastObstacleAt = 0;
+let localLastObstacleLanes: number[] = [];
+let crashObstacleSpawned = false;
 let localRoundTimer: ReturnType<typeof setInterval> | null = null;
 let localCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -150,6 +155,8 @@ let shownBanners = new Set<number>();
 function startLocalRound() {
   shownBanners.clear();
   roundRunning = false;
+  crashObstacleSpawned = false;
+  roadScene.clearGameObjects();
   setRoundStatus('waiting');
   resetUI();
 
@@ -205,18 +212,32 @@ function startLocalRound() {
 }
 
 let localTick: ReturnType<typeof setInterval> | null = null;
+let lastTickTime = 0;
 
 function localTickLoop() {
   if (localTick) clearInterval(localTick);
+  lastTickTime = Date.now();
   localTick = setInterval(() => {
     // Keep running even after cashout — round continues until crash
     if (engine.state.phase !== 'RUNNING' && engine.state.phase !== 'CASHED_OUT') {
       clearInterval(localTick!); localTick = null; return;
     }
 
-    const elapsed = Date.now() - engine.state.startTime!;
+    const now = Date.now();
+    const tickGap = now - lastTickTime;
+    lastTickTime = now;
+
+    const elapsed = now - engine.state.startTime!;
     engine.state.multiplier = Math.max(1, Math.exp(0.000055 * elapsed));
     const mult = engine.state.multiplier;
+
+    // Catch up on missed obstacle spawns after tab was in background
+    if (tickGap > 200) {
+      const missedTicks = Math.min(Math.floor(tickGap / 80), 10);
+      for (let i = 0; i < missedTicks; i++) {
+        if (mult < engine.state.crashPoint! * 0.9) localMaybeSpawnObstacle();
+      }
+    }
 
     // Phase change
     const newPhase = getChasePhase(mult);
@@ -247,21 +268,74 @@ function localTickLoop() {
       if (autoCashOut && mult >= autoCashOutTarget) localCashOut();
     }
 
-    // Crash check — fires even after cashout to end the round
-    if (mult >= engine.state.crashPoint!) {
-      clearInterval(localTick!);
-      localTick = null;
-      const wasCashedOut = engine.state.phase === 'CASHED_OUT';
-      engine.state.phase = 'CRASHED';
-      localOnCrash(wasCashedOut);
-      return;
+    // Pre-spawn crash obstacle from horizon when approaching crash point
+    const crashSpawnAt = engine.state.chasePhase <= 2 ? 0.88 : 0.92;
+    if (!crashObstacleSpawned && engine.state.crashPoint! > 1.00 && mult >= engine.state.crashPoint! * crashSpawnAt) {
+      crashObstacleSpawned = true;
+      roadScene.obstacles.push({
+        type: LOCAL_OBSTACLE_TYPES[Math.floor(Math.random() * LOCAL_OBSTACLE_TYPES.length)] as any,
+        rx: localKashLane, rz: 0.02, speed: 0, color: '#EF4444', lanes: 1, isCrash: true,
+      });
     }
 
-    // Spawn obstacles (not near crash)
-    if (mult < engine.state.crashPoint! * 0.9) {
-      localMaybeSpawnObstacle();
+    // Crash check — wait for crash obstacle to reach Kash
+    if (mult >= engine.state.crashPoint!) {
+      const crashObs = roadScene.obstacles.find(o => o.isCrash);
+      // If crash obstacle exists but hasn't reached Kash yet, keep ticking
+      if (crashObs && crashObs.rz < 0.35) {
+        // Freeze multiplier at crash point while obstacle approaches
+        engine.state.multiplier = engine.state.crashPoint!;
+      } else {
+        clearInterval(localTick!);
+        localTick = null;
+        const wasCashedOut = engine.state.phase === 'CASHED_OUT';
+        engine.state.phase = 'CRASHED';
+        localOnCrash(wasCashedOut);
+        return;
+      }
+    }
+
+    // Spawn obstacles and dodge — stop both once crash obstacle is spawned
+    if (!crashObstacleSpawned) {
+      if (mult < engine.state.crashPoint! * 0.9) {
+        localMaybeSpawnObstacle();
+      }
+      localCheckDodge();
     }
   }, 80);
+}
+
+let localDodgeCooldown = 0;
+
+/** Check all active obstacles approaching Kash and dodge if needed */
+function localCheckDodge() {
+  const now = Date.now();
+  if (now - localDodgeCooldown < 300) return;
+
+  // Find non-crash obstacles in the danger zone (approaching Kash at rz=0.4)
+  const approaching = roadScene.obstacles.filter(o => !o.isCrash && o.rz > 0.15 && o.rz < 0.5);
+  if (approaching.length === 0) return;
+
+  // Check if any approaching obstacle is in Kash's lane
+  const inDanger = approaching.some(o => {
+    const radius = o.lanes === 2 ? 0.7 : 0.4;
+    return Math.abs(localKashLane - o.rx) < radius;
+  });
+  if (!inDanger) return;
+
+  // Need to dodge — find safe lane considering ALL approaching obstacles (skip crash)
+  const safeLanes = LOCAL_KASH_LANES.filter(kl =>
+    approaching.every(o => {
+      const safeR = o.lanes === 2 ? 0.6 : 0.3;
+      return Math.abs(kl - o.rx) > safeR;
+    })
+  );
+
+  if (safeLanes.length > 0) {
+    localKashLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
+    roadScene.riderLane = localKashLane;
+    localDodgeCooldown = now;
+  }
 }
 
 function localMaybeSpawnObstacle() {
@@ -273,25 +347,30 @@ function localMaybeSpawnObstacle() {
 
   const multiChance = [0.15, 0.25, 0.35, 0.45, 0.5][phase - 1];
   const count = Math.random() < multiChance ? 2 : 1;
+
+  // Exclude lanes used in the previous spawn
+  const excludePrev = (l: number) => !localLastObstacleLanes.some(p => Math.abs(p - l) < 0.3);
+
   const usedLanes: number[] = [];
   for (let i = 0; i < count; i++) {
-    const avail = LOCAL_OBSTACLE_LANES.filter(l => !usedLanes.some(u => Math.abs(u - l) < 0.3));
+    const avail = LOCAL_OBSTACLE_LANES.filter(l => excludePrev(l) && !usedLanes.some(u => Math.abs(u - l) < 0.3));
     if (avail.length === 0) break;
     usedLanes.push(avail[Math.floor(Math.random() * avail.length)]);
   }
+  if (usedLanes.length === 0) return;
 
   // Wide obstacle chance (phase 3+)
-  let isWide = false;
   const wideChance = phase >= 3 ? 0.2 : 0;
   if (Math.random() < wideChance) {
-    isWide = true;
-    const type = LOCAL_WIDE_TYPES[Math.floor(Math.random() * LOCAL_WIDE_TYPES.length)];
-    const lane = [-0.333, 0.333][Math.floor(Math.random() * 2)];
-    roadScene.obstacles.push({
-      type: type as any, rx: lane, rz: 0.02, speed: 0, color: '#EF4444', lanes: 2,
-    });
-    usedLanes.length = 0;
-    usedLanes.push(lane);
+    const wideLanes = [-0.333, 0.333].filter(l => excludePrev(l));
+    if (wideLanes.length > 0) {
+      const type = LOCAL_WIDE_TYPES[Math.floor(Math.random() * LOCAL_WIDE_TYPES.length)];
+      const lane = wideLanes[Math.floor(Math.random() * wideLanes.length)];
+      roadScene.obstacles.push({
+        type: type as any, rx: lane, rz: 0.02, speed: 0, color: '#EF4444', lanes: 2,
+      });
+      localLastObstacleLanes = [lane];
+    }
   } else {
     for (const l of usedLanes) {
       roadScene.obstacles.push({
@@ -299,17 +378,7 @@ function localMaybeSpawnObstacle() {
         rx: l, rz: 0.02, speed: 0, color: '#EF4444', lanes: 1,
       });
     }
-  }
-
-  const dangerRadius = isWide ? 0.7 : 0.4;
-  const safeRadius = isWide ? 0.6 : 0.3;
-  const inDanger = usedLanes.some(l => Math.abs(localKashLane - l) < dangerRadius);
-  if (inDanger) {
-    const safeLanes = LOCAL_KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > safeRadius));
-    if (safeLanes.length > 0) {
-      localKashLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
-      roadScene.riderLane = localKashLane;
-    }
+    localLastObstacleLanes = [...usedLanes];
   }
 }
 
@@ -349,47 +418,36 @@ function localOnCrash(alreadyCashedOut = false) {
     engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: playerLost ? engine.state.bet : 0 });
     if (engine.state.history.length > 20) engine.state.history.pop();
     playerInRound = false;
-    setMainButton('bet');
-    setBetControlsEnabled(true);
+    if (pendingBet === null) { setMainButton('bet'); setBetControlsEnabled(true); }
     setTimeout(() => { updateBalanceDisplay(); updateHistory(); updateStats(); }, 800);
     setTimeout(() => startLocalRound(), 3000);
     return;
   }
 
-  // Spawn crash obstacle from horizon
-  roadScene.obstacles.push({
-    type: LOCAL_OBSTACLE_TYPES[Math.floor(Math.random() * LOCAL_OBSTACLE_TYPES.length)] as any,
-    rx: localKashLane, rz: 0, speed: 0, color: '#EF4444', lanes: 1,
-  });
+  // Crash obstacle already pre-spawned from horizon — trigger effects immediately
+  // Keep only the crash obstacle visible
+  const crashObs = roadScene.obstacles.find(o => o.isCrash);
+  roadScene.obstacles = crashObs ? [crashObs] : [];
 
-  const delay = [1000, 600, 380, 300, 200][engine.state.chasePhase - 1];
-  setTimeout(() => {
-    setRoundStatus('crash');
-    Audio.stopAll();
-    roadScene.spawnCrashParticles();
-    if (roadScene.obstacles.length > 0) {
-      const last = roadScene.obstacles[roadScene.obstacles.length - 1];
-      roadScene.obstacles.length = 0;
-      roadScene.obstacles.push(last);
-    }
-    Audio.playCrash();
-    flashScreen('#EF4444', 600);
-    showCrashDisplay(crashPoint);
+  setRoundStatus('crash');
+  Audio.stopAll();
+  roadScene.spawnCrashParticles();
+  Audio.playCrash();
+  flashScreen('#EF4444', 600);
+  showCrashDisplay(crashPoint);
 
-    if (playerLost) {
-      engine.state.balance -= engine.state.bet;
-      engine.state.sessionProfit -= engine.state.bet;
-      engine.state.sessionRounds++;
-    }
-    engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: playerLost ? engine.state.bet : 0 });
-    if (engine.state.history.length > 20) engine.state.history.pop();
-    playerInRound = false;
-    setMainButton('bet');
-    setBetControlsEnabled(true);
+  if (playerLost) {
+    engine.state.balance -= engine.state.bet;
+    engine.state.sessionProfit -= engine.state.bet;
+    engine.state.sessionRounds++;
+  }
+  engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: playerLost ? engine.state.bet : 0 });
+  if (engine.state.history.length > 20) engine.state.history.pop();
+  playerInRound = false;
+  if (pendingBet === null) { setMainButton('bet'); setBetControlsEnabled(true); }
 
-    setTimeout(() => { updateBalanceDisplay(); updateHistory(); updateStats(); }, 800);
-    setTimeout(() => startLocalRound(), 3000);
-  }, delay);
+  setTimeout(() => { updateBalanceDisplay(); updateHistory(); updateStats(); }, 800);
+  setTimeout(() => startLocalRound(), 3000);
 }
 
 function localOnCashOut(amount: number) {
@@ -445,8 +503,8 @@ function placeBet(): void {
   if (amount > engine.state.balance) { showFloatingText('Insufficient balance', '#EF4444', W / 2, 500); return; }
   if (amount < 1) { showFloatingText('Minimum bet: $1.00', '#EF4444', W / 2, 500); return; }
 
-  if (roundRunning) {
-    // Round already started — queue for next round
+  if (roundRunning || engine.state.phase === 'CRASHED' || engine.state.phase === 'CASHED_OUT') {
+    // Round in play or crash animation — queue for next round
     pendingBet = amount;
     setMainButton('queued', amount);
     setBetControlsEnabled(false);

@@ -14,8 +14,28 @@
   }
   #intro-screen.hidden { opacity: 0; pointer-events: none; transition: opacity 0.8s; }
   #intro-video { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #intro-loading {
+    position: absolute; bottom: 30px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    opacity: 0; transition: opacity 0.5s;
+  }
+  #intro-loading.visible { opacity: 1; }
+  #intro-loading-text {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: #505064; letter-spacing: 1px;
+  }
+  #intro-loading-bar-wrap {
+    width: 160px; height: 3px;
+    background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden;
+  }
+  #intro-loading-bar {
+    width: 0%; height: 100%;
+    background: linear-gradient(90deg, #EAB308, #EA580C);
+    border-radius: 2px; transition: width 0.3s;
+  }
   #intro-tap-hint {
-    position: absolute; bottom: 60px; left: 50%;
+    position: absolute; bottom: 80px; left: 50%;
     transform: translateX(-50%);
     font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700;
     letter-spacing: 3px; color: #EAB308; text-shadow: 0 0 20px rgba(234,179,8,0.5);
@@ -34,6 +54,10 @@
     <source src="/assets/kash-intro.webm" type="video/webm">
     <source src="/assets/kash-intro.mp4" type="video/mp4">
   </video>
+  <div id="intro-loading" class="visible">
+    <div id="intro-loading-bar-wrap"><div id="intro-loading-bar"></div></div>
+    <div id="intro-loading-text">Loading...</div>
+  </div>
   <div id="intro-tap-hint"></div>
   <script>document.getElementById('intro-tap-hint').textContent = 'ontouchstart' in window ? 'TAP TO PLAY' : 'CLICK TO PLAY';</script>
 </div>
