@@ -7,26 +7,35 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,600;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   body { margin: 0; background: #0F0F1E; }
-  #loading-screen {
+  #intro-screen {
     position: fixed; inset: 0; z-index: 9999;
     background: #0F0F1E;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 20px;
+    display: flex; align-items: center; justify-content: center;
   }
-  #loading-screen.hidden { opacity: 0; pointer-events: none; transition: opacity 0.5s; }
-  #loading-logo { font-family: 'Barlow Condensed', sans-serif; font-size: 32px; font-weight: 900; letter-spacing: 4px; color: #EAB308; text-shadow: 0 0 30px rgba(234,179,8,0.5); }
-  #loading-bar-wrap { width: 200px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
-  #loading-bar { width: 0%; height: 100%; background: linear-gradient(90deg, #EAB308, #EA580C); border-radius: 2px; transition: width 0.3s; }
-  #loading-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #505064; letter-spacing: 1px; }
+  #intro-screen.hidden { opacity: 0; pointer-events: none; transition: opacity 0.8s; }
+  #intro-video { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #intro-tap-hint {
+    position: absolute; bottom: 60px; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Barlow Condensed', sans-serif; font-size: 16px; font-weight: 700;
+    letter-spacing: 3px; color: #EAB308; text-shadow: 0 0 20px rgba(234,179,8,0.5);
+    opacity: 0; transition: opacity 0.5s;
+    animation: pulse-hint 1.5s ease-in-out infinite;
+  }
+  #intro-tap-hint.visible { opacity: 1; }
+  @keyframes pulse-hint { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
   #wrap { visibility: hidden; }
 </style>
 </head>
 <body>
-<!-- Loading screen -->
-<div id="loading-screen">
-  <div id="loading-logo">KASH RUNDOWN</div>
-  <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
-  <div id="loading-text">Loading...</div>
+<!-- Intro video screen -->
+<div id="intro-screen">
+  <video id="intro-video" playsinline muted preload="auto">
+    <source src="/assets/kash-intro.webm" type="video/webm">
+    <source src="/assets/kash-intro.mp4" type="video/mp4">
+  </video>
+  <div id="intro-tap-hint"></div>
+  <script>document.getElementById('intro-tap-hint').textContent = 'ontouchstart' in window ? 'TAP TO PLAY' : 'CLICK TO PLAY';</script>
 </div>
 
 <div id="wrap">

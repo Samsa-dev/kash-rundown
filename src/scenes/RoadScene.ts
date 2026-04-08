@@ -79,6 +79,7 @@ export class RoadScene {
   private riderSprite: Sprite | null = null;
   private riderImageSprite: Sprite | null = null;
   private riderVideoSprite: Sprite | null = null;
+  private safariVideoOverlay: HTMLVideoElement | null = null;
   private obstacleTextures: Map<string, Texture> = new Map();
   private obstacleContainer: Container = new Container();
   public useObstacleSprites = true;
@@ -1395,9 +1396,47 @@ export class RoadScene {
         this.riderSprite = this.riderImageSprite;
       }
     } else {
-      // Safari — use image only
-      this.riderContainer.addChild(this.riderImageSprite);
-      this.riderSprite = this.riderImageSprite;
+      // Safari — use HTML video overlay for HEVC alpha (WebGL can't handle it)
+      try {
+        const video = document.createElement('video');
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.autoplay = true;
+        const hevc = video.canPlayType('video/mp4; codecs="hvc1"') || video.canPlayType('video/quicktime');
+        if (!hevc) throw new Error('HEVC not supported');
+        video.src = '/assets/kash-rider-safari.mov';
+        await new Promise<void>((resolve, reject) => {
+          video.oncanplay = () => resolve();
+          video.onerror = () => reject(new Error(`Video error: ${video.error?.message}`));
+          video.load();
+        });
+        await video.play();
+
+        // Position video as HTML overlay on top of canvas
+        video.style.cssText = `
+          position: absolute;
+          pointer-events: none;
+          transform-origin: center center;
+          z-index: 10;
+        `;
+        const container = document.getElementById('pixi-container');
+        if (container) {
+          container.style.position = 'relative';
+          container.appendChild(video);
+        }
+        this.safariVideoOverlay = video;
+
+        // Still use image sprite for PixiJS (invisible, but needed for position calc)
+        this.riderImageSprite.visible = false;
+        this.riderContainer.addChild(this.riderImageSprite);
+        this.riderSprite = this.riderImageSprite;
+        console.log('[RoadScene] Safari HEVC alpha overlay active');
+      } catch (e) {
+        console.warn('[RoadScene] Safari HEVC failed, using static image:', e);
+        this.riderContainer.addChild(this.riderImageSprite);
+        this.riderSprite = this.riderImageSprite;
+      }
     }
   }
 
@@ -1447,6 +1486,28 @@ export class RoadScene {
     this.riderSprite.x = p.x;
     this.riderSprite.y = p.y + this.riderYOffset;
     this.riderSprite.scale.set(spriteScale);
+
+    // Sync Safari HTML video overlay position
+    if (this.safariVideoOverlay) {
+      const canvas = document.querySelector('#pixi-container canvas') as HTMLCanvasElement | null;
+      if (canvas) {
+        const cssScaleX = canvas.clientWidth / W;
+        const cssScaleY = canvas.clientHeight / H;
+        const cssX = p.x * cssScaleX;
+        const cssY = (p.y + this.riderYOffset) * cssScaleY;
+        // Use video scale (no heightFactor reduction)
+        const videoScale = this.riderScale * p.scale;
+        const videoSize = 390 * videoScale;
+        const cssSizeW = videoSize * cssScaleX;
+        const cssSizeH = videoSize * cssScaleY;
+        const rot = this.riderSprite.rotation;
+        this.safariVideoOverlay.style.width = `${cssSizeW}px`;
+        this.safariVideoOverlay.style.height = `${cssSizeH}px`;
+        this.safariVideoOverlay.style.left = `${cssX - cssSizeW / 2}px`;
+        this.safariVideoOverlay.style.top = `${cssY - cssSizeH / 2}px`;
+        this.safariVideoOverlay.style.transform = `rotate(${rot}rad)`;
+      }
+    }
 
     // Darken Kash when it rains + siren color tint (phase 2+)
     const phase = state.chasePhase;
