@@ -10,16 +10,35 @@ export class GameClient {
   private handlers = new Map<string, MessageHandler[]>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private url: string;
+  public connected = false;
+  public offline = false;
 
   constructor(url: string) {
     this.url = url;
   }
 
   connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+    return new Promise((resolve) => {
+      try {
+        this.ws = new WebSocket(this.url);
+      } catch {
+        console.log('[GameClient] WebSocket not available, going offline');
+        this.offline = true;
+        resolve();
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        console.log('[GameClient] Connection timeout, going offline');
+        this.offline = true;
+        this.ws?.close();
+        resolve();
+      }, 3000);
 
       this.ws.onopen = () => {
+        clearTimeout(timeout);
+        this.connected = true;
+        this.offline = false;
         console.log('[GameClient] Connected');
         resolve();
       };
@@ -37,13 +56,20 @@ export class GameClient {
       };
 
       this.ws.onclose = () => {
-        console.log('[GameClient] Disconnected, reconnecting in 2s...');
-        this.reconnectTimer = setTimeout(() => this.connect(), 2000);
+        this.connected = false;
+        if (!this.offline) {
+          console.log('[GameClient] Disconnected, reconnecting in 2s...');
+          this.reconnectTimer = setTimeout(() => this.connect(), 2000);
+        }
       };
 
-      this.ws.onerror = (e) => {
-        console.error('[GameClient] Error', e);
-        reject(e);
+      this.ws.onerror = () => {
+        clearTimeout(timeout);
+        if (!this.connected) {
+          console.log('[GameClient] Connection failed, going offline');
+          this.offline = true;
+          resolve();
+        }
       };
     });
   }

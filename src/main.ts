@@ -49,10 +49,17 @@ async function init() {
   loadBar.style.width = '70%';
   loadText.textContent = 'Connecting to server...';
   await client.connect();
-  wireServerEvents();
+
+  let offlineMode = client.offline;
+  if (offlineMode) {
+    console.log('[Main] Offline mode — using local game engine');
+    wireLocalMode();
+  } else {
+    wireServerEvents();
+  }
 
   loadBar.style.width = '90%';
-  loadText.textContent = 'Setting up...';
+  loadText.textContent = offlineMode ? 'Offline mode...' : 'Setting up...';
 
   app.ticker.add(() => roadScene.update(engine.state));
 
@@ -93,6 +100,205 @@ async function init() {
   loadText.textContent = 'Ready';
   document.getElementById('wrap')!.style.visibility = 'visible';
   setTimeout(() => document.getElementById('loading-screen')!.classList.add('hidden'), 300);
+}
+
+// ══════════════════════════════════════
+//  OFFLINE / LOCAL MODE
+// ══════════════════════════════════════
+
+const LOCAL_OBSTACLE_TYPES = ['barricade', 'spikes', 'dumpster', 'cones', 'manhole'];
+const LOCAL_OBSTACLE_LANES = [-0.667, 0, 0.667];
+const LOCAL_KASH_LANES = [-0.8, -0.05, 0.7];
+let localKashLane = -0.05;
+let localLastObstacleAt = 0;
+let localRoundTimer: ReturnType<typeof setInterval> | null = null;
+let localCountdownTimer: ReturnType<typeof setInterval> | null = null;
+
+function wireLocalMode() {
+  // Auto-start rounds
+  startLocalRound();
+
+  engine.on((event) => {
+    switch (event.type) {
+      case 'MULTIPLIER_UPDATE': {
+        const mult = event.multiplier;
+        engine.state.chasePhase = getChasePhase(mult);
+
+        // Phase banners
+        const newPhase = engine.state.chasePhase;
+        const banner = PHASE_BANNERS[newPhase];
+        if (banner && !shownBanners.has(newPhase)) {
+          shownBanners.add(newPhase);
+          showBanner(banner);
+        }
+
+        roadScene.serverRoundRunning = true;
+
+        // Multiplier display
+        const mEl = $('multiplier-display');
+        mEl.textContent = mult.toFixed(2) + '×';
+        mEl.className = '';
+        if (newPhase >= 4) mEl.classList.add('phase4');
+        else if (newPhase >= 3) mEl.classList.add('phase3');
+        Audio.updateEngine(mult);
+
+        if (engine.state.phase === 'RUNNING' && playerInRound) {
+          const profit = engine.state.bet * mult - engine.state.bet;
+          $('profit-display').textContent = '▲ +$' + profit.toFixed(2);
+          setMainButton('cashout', engine.state.bet * mult);
+          if (autoCashOut && mult >= autoCashOutTarget) localCashOut();
+        }
+
+        // Spawn obstacles locally
+        localMaybeSpawnObstacle();
+        break;
+      }
+      case 'CRASH':
+        localOnCrash();
+        break;
+      case 'CASH_OUT':
+        localOnCashOut(event.amount);
+        break;
+    }
+  });
+}
+
+let shownBanners = new Set<number>();
+
+function startLocalRound() {
+  shownBanners.clear();
+  setRoundStatus('waiting');
+  resetUI();
+
+  // Simulate bet ticker
+  startBetTicker();
+
+  // Countdown
+  let n = 5;
+  startCountdown(5);
+
+  // After countdown, start engine
+  setTimeout(() => {
+    stopBetTicker();
+    if (playerInRound) {
+      engine.startRound();
+      setRoundStatus('in-play');
+      $('profit-display').classList.add('visible');
+      showKashQuote(dialogue.getRundownLine('round_start'));
+      Audio.initAudio();
+      Audio.startEngine();
+    } else {
+      // Even without bet, run the engine for spectating
+      engine.state.crashPoint = engine.state.crashPoint; // already set by placeBet
+      engine.startRound();
+      setRoundStatus('in-play');
+      Audio.initAudio();
+      Audio.startEngine();
+    }
+  }, 5000);
+}
+
+function localMaybeSpawnObstacle() {
+  const now = Date.now();
+  const phase = engine.state.chasePhase;
+  const interval = [1200, 800, 500, 350, 250][phase - 1];
+  if (now - localLastObstacleAt < interval || Math.random() > 0.7) return;
+  localLastObstacleAt = now;
+
+  const multiChance = [0.15, 0.25, 0.35, 0.45, 0.5][phase - 1];
+  const count = Math.random() < multiChance ? 2 : 1;
+  const usedLanes: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const avail = LOCAL_OBSTACLE_LANES.filter(l => !usedLanes.some(u => Math.abs(u - l) < 0.3));
+    if (avail.length === 0) break;
+    usedLanes.push(avail[Math.floor(Math.random() * avail.length)]);
+  }
+
+  for (const l of usedLanes) {
+    roadScene.obstacles.push({
+      type: LOCAL_OBSTACLE_TYPES[Math.floor(Math.random() * LOCAL_OBSTACLE_TYPES.length)] as any,
+      rx: l, rz: 0.02, speed: 0, color: '#EF4444', lanes: 1,
+    });
+  }
+
+  const inDanger = usedLanes.some(l => Math.abs(localKashLane - l) < 0.4);
+  if (inDanger) {
+    const safeLanes = LOCAL_KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > 0.3));
+    if (safeLanes.length > 0) {
+      const newLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
+      const delay = phase <= 2 ? 150 + Math.random() * 100 : 0;
+      if (delay > 0) {
+        setTimeout(() => { localKashLane = newLane; roadScene.riderLane = newLane; }, delay);
+      } else {
+        localKashLane = newLane;
+        roadScene.riderLane = newLane;
+      }
+    }
+  }
+}
+
+function localCashOut() {
+  engine.doCashOut();
+}
+
+function localOnCrash() {
+  const crashPoint = engine.state.crashPoint!;
+  roadScene.serverRoundRunning = false;
+
+  // Spawn crash obstacle
+  roadScene.obstacles.push({
+    type: LOCAL_OBSTACLE_TYPES[Math.floor(Math.random() * LOCAL_OBSTACLE_TYPES.length)] as any,
+    rx: localKashLane, rz: 0, speed: 0, color: '#EF4444', lanes: 1,
+  });
+
+  const delay = [1000, 600, 380, 300, 200][engine.state.chasePhase - 1];
+  setTimeout(() => {
+    setRoundStatus('crash');
+    Audio.stopEngine();
+    roadScene.spawnCrashParticles();
+    if (roadScene.obstacles.length > 0) {
+      const last = roadScene.obstacles[roadScene.obstacles.length - 1];
+      roadScene.obstacles.length = 0;
+      roadScene.obstacles.push(last);
+    }
+    Audio.playCrash();
+    flashScreen('#EF4444', 600);
+    showCrashDisplay(crashPoint);
+
+    engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: playerInRound ? engine.state.bet : 0 });
+    if (engine.state.history.length > 20) engine.state.history.pop();
+
+    setTimeout(() => {
+      updateBalanceDisplay();
+      updateHistory();
+      updateStats();
+    }, 800);
+
+    // Next round after 3s
+    setTimeout(() => startLocalRound(), 3000);
+  }, delay);
+}
+
+function localOnCashOut(amount: number) {
+  roadScene.serverRoundRunning = false;
+  playerInRound = false;
+
+  Audio.stopEngine();
+  Audio.playCashOut();
+  flashScreen('#16A34A', 500);
+  showFloatingText('CASHED OUT! +$' + amount.toFixed(2), '#16A34A', W / 2, 350);
+
+  setMainButton('bet');
+  setBetControlsEnabled(true);
+
+  $('win-screen').classList.add('visible');
+  $('win-amount').textContent = '$' + amount.toFixed(2);
+  $('win-mult-val').textContent = engine.state.multiplier.toFixed(2) + '×';
+  updateBalanceDisplay();
+  updateHistory();
+  updateStats();
+
+  setTimeout(() => $('win-screen').classList.remove('visible'), 2200);
 }
 
 // ══════════════════════════════════════
@@ -365,20 +571,30 @@ function placeBet(): void {
   if (amount > engine.state.balance) { showFloatingText('Insufficient balance', '#EF4444', W / 2, 500); return; }
   if (amount < 1) { showFloatingText('Minimum bet: $1.00', '#EF4444', W / 2, 500); return; }
 
-  if (serverRunning || engine.state.phase === 'CRASHED' || engine.state.phase === 'CASHED_OUT') {
-    // Round in progress or between rounds — queue for next
+  if (client.offline) {
+    // Local mode — use engine directly
+    if (engine.placeBet(amount)) {
+      playerInRound = true;
+      updateBalanceDisplay();
+      setMainButton('placed', amount);
+      setBetControlsEnabled(false);
+    }
+  } else if (serverRunning || engine.state.phase === 'CRASHED' || engine.state.phase === 'CASHED_OUT') {
     pendingBet = amount;
     setMainButton('queued', amount);
     setBetControlsEnabled(false);
   } else {
-    // Countdown active or idle — send directly
     client.placeBet(amount);
   }
 }
 
 function doCashOut(): void {
   if (engine.state.phase !== 'RUNNING') return;
-  client.cashOut();
+  if (client.offline) {
+    engine.doCashOut();
+  } else {
+    client.cashOut();
+  }
 }
 
 function setMainButton(state: BtnState, amount?: number): void {
