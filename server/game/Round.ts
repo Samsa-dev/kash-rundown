@@ -98,9 +98,11 @@ export class Round {
     }
 
     // Chance of a wide obstacle instead of normal ones
+    let isWide = false;
     const wideChance = this.chasePhase >= 3 ? 0.2 : 0;
     if (WIDE_TYPES.length > 0 && Math.random() < wideChance) {
       // Spawn one wide obstacle instead
+      isWide = true;
       const type = WIDE_TYPES[Math.floor(Math.random() * WIDE_TYPES.length)];
       const lane = [-0.333, 0.333][Math.floor(Math.random() * 2)];
       this.events.onObstacle(type, lane, 2);
@@ -114,10 +116,14 @@ export class Round {
       }
     }
 
+    // Wide obstacles cover more space — bigger danger/safe zone
+    const dangerRadius = isWide ? 0.7 : 0.4;
+    const safeRadius = isWide ? 0.6 : 0.3;
+
     // Kash only moves when in danger
-    const inDanger = usedLanes.some(l => Math.abs(this.kashLane - l) < 0.4);
+    const inDanger = usedLanes.some(l => Math.abs(this.kashLane - l) < dangerRadius);
     if (inDanger) {
-      const safeLanes = KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > 0.3));
+      const safeLanes = KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > safeRadius));
       if (safeLanes.length > 0) {
         const newLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
         // Slow phases: delay dodge for drama. Fast phases: instant
