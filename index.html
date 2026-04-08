@@ -45,6 +45,18 @@
   }
   #intro-skip.visible { opacity: 1; }
   #intro-skip:hover { color: #EAB308; border-color: rgba(234,179,8,0.4); background: rgba(234,179,8,0.1); }
+  #intro-unmute {
+    position: absolute; bottom: 30px; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600;
+    letter-spacing: 2px; color: rgba(255,255,255,0.6);
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px; padding: 8px 20px;
+    cursor: pointer; opacity: 0; transition: opacity 0.5s;
+    display: none;
+  }
+  #intro-unmute.visible { opacity: 1; display: block; }
+  #intro-unmute:hover { color: #EAB308; border-color: rgba(234,179,8,0.4); background: rgba(234,179,8,0.1); }
   #wrap { visibility: hidden; }
 </style>
 </head>
@@ -60,6 +72,8 @@
     <div id="intro-loading-text">Loading...</div>
   </div>
   <div id="intro-skip">Skip intro &gt;&gt;</div>
+  <div id="intro-unmute"></div>
+  <script>document.getElementById('intro-unmute').textContent = 'ontouchstart' in window ? '🔊 Tap to unmute' : '🔊 Click to unmute';</script>
 </div>
 
 <div id="wrap">

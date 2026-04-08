@@ -103,30 +103,50 @@ async function init() {
   loadingBar.style.width = '100%';
   loadingText.textContent = 'Ready';
 
-  // Try autoplay with audio — if blocked, try muted, then show skip anyway
-  introVideo.play().then(() => {
+  const unmuteBtn = document.getElementById('intro-unmute')!;
+
+  // Mute game audio during intro
+  Audio.initAudio();
+  Audio.toggleMute(); // mute
+
+  const showReady = () => {
     loadingWrap.classList.remove('visible');
     skipBtn.classList.add('visible');
+  };
+
+  // Try autoplay with audio first
+  introVideo.play().then(() => {
+    // Autoplay with audio worked
+    showReady();
   }).catch(() => {
-    // Autoplay with audio blocked — try muted
+    // Autoplay with audio blocked — try muted video + show unmute button
     introVideo.muted = true;
     introVideo.play().then(() => {
-      loadingWrap.classList.remove('visible');
-      skipBtn.classList.add('visible');
+      showReady();
+      unmuteBtn.classList.add('visible');
     }).catch(() => {
       // Can't play at all — skip to game
-      loadingWrap.classList.remove('visible');
+      showReady();
       showGame();
     });
   });
 
-  // ── Skip intro button only ──
+  // Unmute button — unmute video on tap
+  const onUnmute = () => {
+    introVideo.muted = false;
+    unmuteBtn.classList.remove('visible');
+  };
+  unmuteBtn.addEventListener('click', (e) => { e.stopPropagation(); onUnmute(); });
+  unmuteBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); onUnmute(); });
+
+  // ── Skip intro / video end → start game ──
   let gameShown = false;
   const showGame = () => {
     if (gameShown) return;
     gameShown = true;
-    Audio.initAudio();
     introVideo.pause();
+    // Unmute game audio
+    if (Audio.isMuted()) Audio.toggleMute();
     document.getElementById('wrap')!.style.visibility = 'visible';
     introScreen.classList.add('hidden');
     setTimeout(() => introScreen.remove(), 1000);
