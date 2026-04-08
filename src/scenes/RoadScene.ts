@@ -854,11 +854,31 @@ export class RoadScene {
 
   private drawEffectsBack(phase: number): void {
     this.effectsBack.clear();
-    if (phase < 2) return;
+    if (!this.serverRoundRunning && phase < 2) return;
+    if (phase < 1) return;
+
+    // Siren flash overlay
     const cycle = Math.floor(Date.now() / 300) % 2;
-    const color = cycle === 0 ? 0xDC1E50 : 0x2563EB;
-    const alpha = phase >= 4 ? 0.1 : 0.06;
-    this.effectsBack.rect(0, 0, W, H).fill({ color, alpha });
+    if (phase >= 2) {
+      const color = cycle === 0 ? 0xDC1E50 : 0x2563EB;
+      const alpha = phase >= 4 ? 0.1 : 0.06;
+      this.effectsBack.rect(0, 0, W, H).fill({ color, alpha });
+    }
+
+    // Siren glow bars at bottom — red left, blue right, alternating
+    if (this.serverRoundRunning) {
+      const glowH = 120;
+      const glowY = H - glowH;
+      const glowAlpha = 0.08 + Math.min(0.12, phase * 0.03);
+      const t = (Math.sin(Date.now() / 150) + 1) / 2; // 0-1 smooth oscillation
+
+      // Left glow — red
+      this.effectsBack.rect(0, glowY, W / 2, glowH)
+        .fill({ color: 0xEF4444, alpha: glowAlpha * t });
+      // Right glow — blue
+      this.effectsBack.rect(W / 2, glowY, W / 2, glowH)
+        .fill({ color: 0x2563EB, alpha: glowAlpha * (1 - t) });
+    }
   }
 
   private drawObstaclesPixi(state: GameState): void {
@@ -1291,6 +1311,7 @@ export class RoadScene {
       'police': '/assets/obstacle-police.webp',
       'truck': '/assets/obstacle-truck.webp',
       'manhole': '/assets/obstacle-manhole.webp',
+      'police_alt': '/assets/obstacle-police-alt.webp',
     };
     for (const [key, src] of Object.entries(map)) {
       const tex = await Assets.load({ src, data: { scaleMode: 'linear', autoGenerateMipmaps: true } });

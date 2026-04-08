@@ -115,4 +115,48 @@ export function stopEngine(): void {
     try { engineOsc.stop(); } catch (_) { /* already stopped */ }
     engineOsc = null;
   }
+  stopSiren();
+}
+
+// ── Siren SFX ──
+let sirenOsc: OscillatorNode | null = null;
+let sirenGain: GainNode | null = null;
+let sirenLfo: OscillatorNode | null = null;
+
+export function startSiren(): void {
+  if (muted) return;
+  try {
+    const ac = getAudio();
+    if (sirenOsc) stopSiren();
+
+    // Main siren tone
+    sirenOsc = ac.createOscillator();
+    sirenGain = ac.createGain();
+    sirenOsc.type = 'sine';
+    sirenOsc.frequency.value = 600;
+    sirenGain.gain.value = 0.04;
+
+    // LFO to sweep frequency up/down (classic siren wail)
+    sirenLfo = ac.createOscillator();
+    const lfoGain = ac.createGain();
+    sirenLfo.type = 'sine';
+    sirenLfo.frequency.value = 1.5; // sweep speed: 1.5 Hz
+    lfoGain.gain.value = 250; // sweep range: ±250 Hz
+
+    sirenLfo.connect(lfoGain);
+    lfoGain.connect(sirenOsc.frequency);
+    sirenOsc.connect(sirenGain);
+    sirenGain.connect(ac.destination);
+
+    sirenOsc.start();
+    sirenLfo.start();
+  } catch (_) { /* audio not available */ }
+}
+
+export function stopSiren(): void {
+  try {
+    if (sirenOsc) { sirenOsc.stop(); sirenOsc = null; }
+    if (sirenLfo) { sirenLfo.stop(); sirenLfo = null; }
+    sirenGain = null;
+  } catch (_) { /* already stopped */ }
 }

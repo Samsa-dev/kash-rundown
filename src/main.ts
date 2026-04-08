@@ -187,6 +187,7 @@ function startLocalRound() {
       showKashQuote(dialogue.getRundownLine('round_start'));
       Audio.initAudio();
       Audio.startEngine();
+      Audio.startSiren();
     } else {
       // Even without bet, run the engine for spectating
       engine.state.crashPoint = engine.state.crashPoint; // already set by placeBet
@@ -194,6 +195,7 @@ function startLocalRound() {
       setRoundStatus('in-play');
       Audio.initAudio();
       Audio.startEngine();
+      Audio.startSiren();
     }
   }, 5000);
 }
@@ -406,6 +408,7 @@ function wireServerEvents() {
       stopBetTicker();
       Audio.initAudio();
       Audio.startEngine();
+      Audio.startSiren();
 
       // Disable bet controls, switch button
       setBetControlsEnabled(false);
