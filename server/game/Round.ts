@@ -9,7 +9,7 @@ export interface RoundEvents {
   onKashMove(lane: number): void;
 }
 
-const OBSTACLE_TYPES = ['barricade', 'spikes', 'dumpster', 'cones', 'manhole', 'police'];
+const OBSTACLE_TYPES = ['barricade', 'spikes', 'dumpster', 'cones', 'manhole'];
 const WIDE_TYPES = ['police_alt'];
 const OBSTACLE_LANES = [-0.667, 0, 0.667];
 const KASH_LANES = [-0.8, -0.05, 0.7];
