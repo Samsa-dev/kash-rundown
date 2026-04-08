@@ -61,9 +61,6 @@ async function init() {
   ]);
   loadingBar.style.width = '90%';
 
-  // Everything runs locally — no server needed
-  wireLocalMode();
-
   app.ticker.add(() => roadScene.update(engine.state));
 
   // ── Wire DOM ──
@@ -148,6 +145,8 @@ async function init() {
     document.getElementById('wrap')!.style.visibility = 'visible';
     introScreen.classList.add('hidden');
     setTimeout(() => introScreen.remove(), 1000);
+    // Start game loop after intro
+    wireLocalMode();
   };
 
   skipBtn.addEventListener('click', (e) => { e.stopPropagation(); showGame(); });
