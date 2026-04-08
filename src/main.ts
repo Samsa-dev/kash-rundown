@@ -256,7 +256,7 @@ function localOnCrash() {
   const delay = [1000, 600, 380, 300, 200][engine.state.chasePhase - 1];
   setTimeout(() => {
     setRoundStatus('crash');
-    Audio.stopEngine();
+    Audio.stopAll();
     roadScene.spawnCrashParticles();
     if (roadScene.obstacles.length > 0) {
       const last = roadScene.obstacles[roadScene.obstacles.length - 1];
@@ -285,7 +285,7 @@ function localOnCashOut(amount: number) {
   roadScene.serverRoundRunning = false;
   playerInRound = false;
 
-  Audio.stopEngine();
+  // Don't stop engine/siren — round still running for others
   Audio.playCashOut();
   flashScreen('#16A34A', 500);
   showFloatingText('CASHED OUT! +$' + amount.toFixed(2), '#16A34A', W / 2, 350);
@@ -455,7 +455,6 @@ function wireServerEvents() {
     engine.state.history.unshift({ mult, result: 'WON', bet: engine.state.bet });
     if (engine.state.history.length > 20) engine.state.history.pop();
 
-    Audio.stopEngine();
     Audio.playCashOut();
     flashScreen('#16A34A', 500);
     showFloatingText('CASHED OUT! +$' + amount.toFixed(2), '#16A34A', W / 2, 350);
@@ -482,7 +481,7 @@ function wireServerEvents() {
 
     // Crash effects always (spectating or playing)
     setRoundStatus('crash');
-    Audio.stopEngine();
+    Audio.stopAll();
     roadScene.spawnCrashParticles();
     // Keep only the crash obstacle (the last one spawned, closest to Kash)
     if (roadScene.obstacles.length > 0) {

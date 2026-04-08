@@ -115,6 +115,10 @@ export function stopEngine(): void {
     try { engineOsc.stop(); } catch (_) { /* already stopped */ }
     engineOsc = null;
   }
+}
+
+export function stopAll(): void {
+  stopEngine();
   stopSiren();
 }
 
