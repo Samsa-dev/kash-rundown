@@ -115,52 +115,7 @@ let localRoundTimer: ReturnType<typeof setInterval> | null = null;
 let localCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
 function wireLocalMode() {
-  // Auto-start rounds
   startLocalRound();
-
-  engine.on((event) => {
-    switch (event.type) {
-      case 'MULTIPLIER_UPDATE': {
-        const mult = event.multiplier;
-        engine.state.chasePhase = getChasePhase(mult);
-
-        // Phase banners
-        const newPhase = engine.state.chasePhase;
-        const banner = PHASE_BANNERS[newPhase];
-        if (banner && !shownBanners.has(newPhase)) {
-          shownBanners.add(newPhase);
-          showBanner(banner);
-        }
-
-        roadScene.serverRoundRunning = true;
-
-        // Multiplier display
-        const mEl = $('multiplier-display');
-        mEl.textContent = mult.toFixed(2) + '×';
-        mEl.className = '';
-        if (newPhase >= 4) mEl.classList.add('phase4');
-        else if (newPhase >= 3) mEl.classList.add('phase3');
-        Audio.updateEngine(mult);
-
-        if (engine.state.phase === 'RUNNING' && playerInRound) {
-          const profit = engine.state.bet * mult - engine.state.bet;
-          $('profit-display').textContent = '▲ +$' + profit.toFixed(2);
-          setMainButton('cashout', engine.state.bet * mult);
-          if (autoCashOut && mult >= autoCashOutTarget) localCashOut();
-        }
-
-        // Spawn obstacles locally
-        localMaybeSpawnObstacle();
-        break;
-      }
-      case 'CRASH':
-        localOnCrash();
-        break;
-      case 'CASH_OUT':
-        localOnCashOut(event.amount);
-        break;
-    }
-  });
 }
 
 let shownBanners = new Set<number>();
@@ -170,34 +125,96 @@ function startLocalRound() {
   setRoundStatus('waiting');
   resetUI();
 
-  // Simulate bet ticker
-  startBetTicker();
+  // Always generate a crash point for the visual simulation
+  const { generateCrashPoint } = engine.constructor.prototype.placeBet
+    ? { generateCrashPoint: null } : { generateCrashPoint: null };
+  // Use the RNG directly
+  engine.state.crashPoint = 1 / (Math.random() * 0.96) ; // simple crash point with ~4% house edge
+  engine.state.crashPoint = Math.max(1, Math.round(engine.state.crashPoint * 100) / 100);
 
-  // Countdown
-  let n = 5;
+  startBetTicker();
   startCountdown(5);
 
-  // After countdown, start engine
   setTimeout(() => {
     stopBetTicker();
+    // Force engine into running state
+    engine.state.phase = 'RUNNING';
+    engine.state.startTime = Date.now();
+    engine.state.multiplier = 1.00;
+    engine.state.chasePhase = 1;
+    engine.state.helicopterActive = false;
+
+    setRoundStatus('in-play');
+    Audio.initAudio();
+    Audio.startEngine();
+    Audio.startSiren();
+
     if (playerInRound) {
-      engine.startRound();
-      setRoundStatus('in-play');
       $('profit-display').classList.add('visible');
+      setMainButton('cashout', engine.state.bet);
+      setBetControlsEnabled(false);
       showKashQuote(dialogue.getRundownLine('round_start'));
-      Audio.initAudio();
-      Audio.startEngine();
-      Audio.startSiren();
-    } else {
-      // Even without bet, run the engine for spectating
-      engine.state.crashPoint = engine.state.crashPoint; // already set by placeBet
-      engine.startRound();
-      setRoundStatus('in-play');
-      Audio.initAudio();
-      Audio.startEngine();
-      Audio.startSiren();
     }
+
+    // Start local tick loop
+    localTickLoop();
   }, 5000);
+}
+
+let localTick: ReturnType<typeof setInterval> | null = null;
+
+function localTickLoop() {
+  if (localTick) clearInterval(localTick);
+  localTick = setInterval(() => {
+    if (engine.state.phase !== 'RUNNING') { clearInterval(localTick!); localTick = null; return; }
+
+    const elapsed = Date.now() - engine.state.startTime!;
+    engine.state.multiplier = Math.max(1, Math.exp(0.000055 * elapsed));
+    const mult = engine.state.multiplier;
+
+    // Phase change
+    const newPhase = getChasePhase(mult);
+    if (newPhase !== engine.state.chasePhase) {
+      engine.state.chasePhase = newPhase;
+      const banner = PHASE_BANNERS[newPhase];
+      if (banner && !shownBanners.has(newPhase)) {
+        shownBanners.add(newPhase);
+        showBanner(banner);
+      }
+    }
+
+    roadScene.serverRoundRunning = true;
+
+    // Multiplier display
+    const mEl = $('multiplier-display');
+    mEl.textContent = mult.toFixed(2) + '×';
+    mEl.className = '';
+    if (newPhase >= 4) mEl.classList.add('phase4');
+    else if (newPhase >= 3) mEl.classList.add('phase3');
+    Audio.updateEngine(mult);
+
+    // Cashout button update
+    if (playerInRound) {
+      const profit = engine.state.bet * mult - engine.state.bet;
+      $('profit-display').textContent = '▲ +$' + profit.toFixed(2);
+      setMainButton('cashout', engine.state.bet * mult);
+      if (autoCashOut && mult >= autoCashOutTarget) localCashOut();
+    }
+
+    // Crash check
+    if (mult >= engine.state.crashPoint!) {
+      clearInterval(localTick!);
+      localTick = null;
+      engine.state.phase = 'CRASHED';
+      localOnCrash();
+      return;
+    }
+
+    // Spawn obstacles (not near crash)
+    if (mult < engine.state.crashPoint! * 0.9) {
+      localMaybeSpawnObstacle();
+    }
+  }, 80);
 }
 
 function localMaybeSpawnObstacle() {
@@ -227,27 +244,52 @@ function localMaybeSpawnObstacle() {
   if (inDanger) {
     const safeLanes = LOCAL_KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > 0.3));
     if (safeLanes.length > 0) {
-      const newLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
-      const delay = phase <= 2 ? 150 + Math.random() * 100 : 0;
-      if (delay > 0) {
-        setTimeout(() => { localKashLane = newLane; roadScene.riderLane = newLane; }, delay);
-      } else {
-        localKashLane = newLane;
-        roadScene.riderLane = newLane;
-      }
+      localKashLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
+      roadScene.riderLane = localKashLane;
     }
   }
 }
 
 function localCashOut() {
-  engine.doCashOut();
+  if (engine.state.phase !== 'RUNNING' || !playerInRound) return;
+  const winAmt = engine.state.bet * engine.state.multiplier;
+  engine.state.phase = 'CASHED_OUT';
+  engine.state.balance += winAmt;
+  engine.state.sessionProfit += winAmt - engine.state.bet;
+  engine.state.sessionRounds++;
+  if (!engine.state.bestRun || engine.state.multiplier > engine.state.bestRun) engine.state.bestRun = engine.state.multiplier;
+  engine.state.history.unshift({ mult: engine.state.multiplier, result: 'WON', bet: engine.state.bet });
+  if (engine.state.history.length > 20) engine.state.history.pop();
+  localOnCashOut(winAmt);
 }
 
 function localOnCrash() {
   const crashPoint = engine.state.crashPoint!;
   roadScene.serverRoundRunning = false;
 
-  // Spawn crash obstacle
+  if (crashPoint <= 1.00) {
+    // Engine stalled — no obstacle
+    setRoundStatus('crash');
+    Audio.stopAll();
+    Audio.playCrash();
+    flashScreen('#EF4444', 600);
+    showCrashDisplay(crashPoint);
+    if (playerInRound) {
+      engine.state.balance -= engine.state.bet;
+      engine.state.sessionProfit -= engine.state.bet;
+      engine.state.sessionRounds++;
+    }
+    engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: playerInRound ? engine.state.bet : 0 });
+    if (engine.state.history.length > 20) engine.state.history.pop();
+    playerInRound = false;
+    setMainButton('bet');
+    setBetControlsEnabled(true);
+    setTimeout(() => { updateBalanceDisplay(); updateHistory(); updateStats(); }, 800);
+    setTimeout(() => startLocalRound(), 3000);
+    return;
+  }
+
+  // Spawn crash obstacle from horizon
   roadScene.obstacles.push({
     type: LOCAL_OBSTACLE_TYPES[Math.floor(Math.random() * LOCAL_OBSTACLE_TYPES.length)] as any,
     rx: localKashLane, rz: 0, speed: 0, color: '#EF4444', lanes: 1,
@@ -267,16 +309,18 @@ function localOnCrash() {
     flashScreen('#EF4444', 600);
     showCrashDisplay(crashPoint);
 
+    if (playerInRound) {
+      engine.state.balance -= engine.state.bet;
+      engine.state.sessionProfit -= engine.state.bet;
+      engine.state.sessionRounds++;
+    }
     engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: playerInRound ? engine.state.bet : 0 });
     if (engine.state.history.length > 20) engine.state.history.pop();
+    playerInRound = false;
+    setMainButton('bet');
+    setBetControlsEnabled(true);
 
-    setTimeout(() => {
-      updateBalanceDisplay();
-      updateHistory();
-      updateStats();
-    }, 800);
-
-    // Next round after 3s
+    setTimeout(() => { updateBalanceDisplay(); updateHistory(); updateStats(); }, 800);
     setTimeout(() => startLocalRound(), 3000);
   }, delay);
 }
@@ -556,8 +600,16 @@ function onMainButtonClick(): void {
   switch (btnState) {
     case 'bet': placeBet(); break;
     case 'placed':
-      // Cancel bet during countdown
-      client.cancelBet();
+      if (client.offline) {
+        // Local cancel — refund
+        engine.state.balance += engine.state.bet;
+        playerInRound = false;
+        updateBalanceDisplay();
+        setMainButton('bet');
+        setBetControlsEnabled(true);
+      } else {
+        client.cancelBet();
+      }
       break;
     case 'cashout': doCashOut(); break;
     case 'queued':
@@ -574,13 +626,14 @@ function placeBet(): void {
   if (amount < 1) { showFloatingText('Minimum bet: $1.00', '#EF4444', W / 2, 500); return; }
 
   if (client.offline) {
-    // Local mode — use engine directly
-    if (engine.placeBet(amount)) {
-      playerInRound = true;
-      updateBalanceDisplay();
-      setMainButton('placed', amount);
-      setBetControlsEnabled(false);
-    }
+    // Local mode — handle bet directly
+    if (amount > engine.state.balance) return;
+    engine.state.balance -= amount;
+    engine.state.bet = amount;
+    playerInRound = true;
+    updateBalanceDisplay();
+    setMainButton('placed', amount);
+    setBetControlsEnabled(false);
   } else if (serverRunning || engine.state.phase === 'CRASHED' || engine.state.phase === 'CASHED_OUT') {
     pendingBet = amount;
     setMainButton('queued', amount);
