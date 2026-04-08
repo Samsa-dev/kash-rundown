@@ -126,21 +126,8 @@ export class Round {
       const safeLanes = KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > safeRadius));
       if (safeLanes.length > 0) {
         const newLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
-        // Slow phases: delay dodge for drama. Fast phases: instant
-        const delay = this.chasePhase <= 2 ? 150 + Math.random() * 100 : 0;
-        if (delay > 0) {
-          if (this.pendingDodge) clearTimeout(this.pendingDodge);
-          this.pendingDodge = setTimeout(() => {
-            this.pendingDodge = null;
-            if (this.phase === 'RUNNING') {
-              this.kashLane = newLane;
-              this.events.onKashMove(newLane);
-            }
-          }, delay);
-        } else {
-          this.kashLane = newLane;
-          this.events.onKashMove(newLane);
-        }
+        this.kashLane = newLane;
+        this.events.onKashMove(newLane);
       }
     }
   }
