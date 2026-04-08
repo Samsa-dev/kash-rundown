@@ -147,7 +147,7 @@ export class RoadScene {
 
     // Kash sprite — loaded async via loadRiderSprite()
 
-    this.effectsBack.blendMode = 'add';
+    this.effectsBack.blendMode = 'normal';
     this.heliGfx.blendMode = 'screen';
 
     this.blurFilter = new BlurFilter({ strength: 0 });
@@ -1368,7 +1368,7 @@ export class RoadScene {
         const videoSource = new VideoSource({ resource: video, autoPlay: true });
         this.riderVideoSprite = new Sprite(new Texture({ source: videoSource }));
         this.riderVideoSprite.anchor.set(0.5, 0.5);
-        this.riderVideoSprite.blendMode = 'screen';
+        // Alpha channel in WebM handles transparency
 
         this.riderImageSprite.visible = false;
         this.riderContainer.addChild(this.riderVideoSprite);
@@ -1419,7 +1419,10 @@ export class RoadScene {
 
     // Scale — normalize to 390px base width so image and video match
     const texW = this.riderSprite.texture.width || 390;
-    const spriteScale = this.riderScale * p.scale * (390 / texW);
+    const baseScale = 390 / texW;
+    // Image is taller than video — scale down further if using image
+    const heightFactor = this.riderSprite === this.riderImageSprite ? 0.5 : 1;
+    const spriteScale = this.riderScale * p.scale * baseScale * heightFactor;
 
     // Tilt during lane change
     const tilt = -(this.riderLane - this.riderLaneActual) * 1.2;
