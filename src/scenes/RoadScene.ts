@@ -1353,8 +1353,6 @@ export class RoadScene {
     });
     this.riderImageSprite = new Sprite(imgTexture);
     this.riderImageSprite.anchor.set(0.5, 1);
-    // Image is much larger than video (1148x1979 vs 390x390) — normalize
-    this.riderImageSprite.scale.set(390 / imgTexture.width);
 
     if (!isSafari) {
       // Load video version for Chrome/Firefox
@@ -1419,8 +1417,9 @@ export class RoadScene {
     const sway = Math.sin(Date.now() / 700) * 0.02;
     const p = roadToScreen(this.riderLaneActual + sway, rz);
 
-    // Scale
-    const spriteScale = this.riderScale * p.scale;
+    // Scale — normalize to 390px base width so image and video match
+    const texW = this.riderSprite.texture.width || 390;
+    const spriteScale = this.riderScale * p.scale * (390 / texW);
 
     // Tilt during lane change
     const tilt = -(this.riderLane - this.riderLaneActual) * 1.2;
