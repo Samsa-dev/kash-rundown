@@ -12,8 +12,13 @@ export function isMuted(): boolean { return muted; }
 
 export function toggleMute(): boolean {
   muted = !muted;
-  if (muted && engineGain) engineGain.gain.value = 0;
-  if (!muted && engineGain) engineGain.gain.value = 0.03;
+  if (muted) {
+    if (engineGain) engineGain.gain.value = 0;
+    if (sirenGain) sirenGain.gain.value = 0;
+  } else {
+    if (engineGain) engineGain.gain.value = 0.03;
+    if (sirenGain) sirenGain.gain.value = 0.04;
+  }
   return muted;
 }
 
