@@ -268,6 +268,7 @@ export class RoadScene {
       this.drawRoad(ctx, phase, state);
     }
     if (phase >= 2) this.drawPuddles(ctx, phase);
+    if (this.serverRoundRunning) this.drawSirenGlow(phase);
   }
 
   /** Draw only the overlays on top of the video background */
@@ -865,38 +866,32 @@ export class RoadScene {
       this.effectsBack.rect(0, 0, W, H).fill({ color, alpha });
     }
 
-    // Police siren glow behind Kash — strong red/blue alternating lights
-    if (this.serverRoundRunning) {
-      const t = (Math.sin(Date.now() / 150) + 1) / 2;
-      const intensity = Math.min(1, 0.5 + phase * 0.15);
+  }
 
-      const cx = W / 2;
-      const cy = H * 0.75;
+  private drawSirenGlow(phase: number): void {
+    const ctx = this.bgCtx;
+    const t = (Math.sin(Date.now() / 150) + 1) / 2;
+    const intensity = Math.min(1, 0.5 + phase * 0.15);
+    const cy = H * 0.75;
+    const radius = 180;
 
-      // Left police light — red (gradient circles fading out)
-      const leftX = cx - 80;
-      for (let r = 200; r > 0; r -= 15) {
-        const fade = (r / 200);
-        this.effectsBack.circle(leftX, cy, r)
-          .fill({ color: 0xEF4444, alpha: t * intensity * 0.03 * (1 - fade) });
-      }
-      this.effectsBack.circle(leftX, cy, 40)
-        .fill({ color: 0xEF4444, alpha: t * intensity * 0.5 });
-      this.effectsBack.circle(leftX, cy, 15)
-        .fill({ color: 0xFF8888, alpha: t * intensity * 0.8 });
+    ctx.save();
+    // Red glow — left
+    const redGrad = ctx.createRadialGradient(W / 2 - 80, cy, 0, W / 2 - 80, cy, radius);
+    redGrad.addColorStop(0, `rgba(239,68,68,${(t * intensity * 0.6).toFixed(2)})`);
+    redGrad.addColorStop(0.3, `rgba(239,68,68,${(t * intensity * 0.2).toFixed(2)})`);
+    redGrad.addColorStop(1, 'rgba(239,68,68,0)');
+    ctx.fillStyle = redGrad;
+    ctx.fillRect(0, cy - radius, W, radius * 2);
 
-      // Right police light — blue (gradient circles fading out)
-      const rightX = cx + 80;
-      for (let r = 200; r > 0; r -= 15) {
-        const fade = (r / 200);
-        this.effectsBack.circle(rightX, cy, r)
-          .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.03 * (1 - fade) });
-      }
-      this.effectsBack.circle(rightX, cy, 40)
-        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.5 });
-      this.effectsBack.circle(rightX, cy, 15)
-        .fill({ color: 0x88BBFF, alpha: (1 - t) * intensity * 0.8 });
-    }
+    // Blue glow — right
+    const blueGrad = ctx.createRadialGradient(W / 2 + 80, cy, 0, W / 2 + 80, cy, radius);
+    blueGrad.addColorStop(0, `rgba(37,99,235,${((1 - t) * intensity * 0.6).toFixed(2)})`);
+    blueGrad.addColorStop(0.3, `rgba(37,99,235,${((1 - t) * intensity * 0.2).toFixed(2)})`);
+    blueGrad.addColorStop(1, 'rgba(37,99,235,0)');
+    ctx.fillStyle = blueGrad;
+    ctx.fillRect(0, cy - radius, W, radius * 2);
+    ctx.restore();
   }
 
   private drawObstaclesPixi(state: GameState): void {
