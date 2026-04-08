@@ -24,8 +24,8 @@ export const PHASE_NAMES: Record<ChasePhase, string> = {
 };
 
 export const PHASE_BANNERS: Record<number, string> = {
-  2: '⚡ 2× — WARMING UP',
-  3: '🔥 5× — HEATING UP',
-  4: '🚨 10× — SIRENS ON',
-  5: '🚁 50× — FULL PURSUIT',
+  2: '⚡ 2× — THEY SEE US',
+  3: '🔥 5× — PEDAL TO THE METAL',
+  4: '🚨 10× — NO TURNING BACK',
+  5: '🚁 50× — LEGEND STATUS',
 };

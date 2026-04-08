@@ -6,8 +6,8 @@ export const SIDE_W = 50;
 export const SWALK_W = 10;
 export const ROAD_L_BOT = -200;
 export const ROAD_R_BOT = W + 200;
-export let ROAD_L_HOR = W / 2 - 8;
-export let ROAD_R_HOR = W / 2 + 8;
+export let ROAD_L_HOR = W / 2;
+export let ROAD_R_HOR = W / 2;
 
 export function setHorizonWidth(half: number): void {
   ROAD_L_HOR = W / 2 - half;

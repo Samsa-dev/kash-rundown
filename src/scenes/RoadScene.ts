@@ -69,12 +69,20 @@ export class RoadScene {
   public container: Container;
 
   private backgroundSprite: Sprite;
+  private videoBgSprite: Sprite | null = null;
+  private bgVideoElement: HTMLVideoElement | null = null;
   private effectsBack: Graphics;
   private obstacleGfx: Graphics;
   private pursuerGfx: Graphics;
   private riderContainer: Container;
   private riderGfx: Graphics;
   private riderSprite: Sprite | null = null;
+  private riderImageSprite: Sprite | null = null;
+  private riderVideoSprite: Sprite | null = null;
+  private obstacleTextures: Map<string, Texture> = new Map();
+  private obstacleContainer: Container = new Container();
+  public useObstacleSprites = true;
+  public obstacleScale = 0.15;
   private heliGfx: Graphics;
   private rainGfx: Graphics;
   private sparkGfx: Graphics;
@@ -105,11 +113,14 @@ export class RoadScene {
   private laneDashOffset = 0;
   private lampOffset = 0;
   public riderLane = 0;
-  public riderDepth = 0.6;
+  public riderDepth = 0.4;
   public serverRoundRunning = false;
+  public useVideoBackground = true;
   public speedLineHeight = 5.5;
   public speedLineInner = 100;
   public speedLineOuter = 200;
+  public riderScale = 1;
+  public riderYOffset = 0;
   private riderLaneActual = 0;
   private riderDepthActual = 0.6;
   private riderLaneSpeed = 0.06;
@@ -149,6 +160,7 @@ export class RoadScene {
     this.container.addChild(this.effectsBack);
     this.container.addChild(this.pursuerGfx);
     this.container.addChild(this.obstacleGfx);
+    this.container.addChild(this.obstacleContainer);
     this.container.addChild(this.riderContainer);
     this.container.addChild(this.heliGfx);
     this.container.addChild(this.rainGfx);
@@ -181,6 +193,14 @@ export class RoadScene {
     this.drawBackground(phase, state);
     this.bgTexture.source.update();
     this.updateFilters(phase);
+
+    // Scale video playback speed with phase
+    if (this.bgVideoElement) {
+      const targetRate = [1.0, 1.2, 1.5, 2.0, 2.5][phase - 1];
+      if (Math.abs(this.bgVideoElement.playbackRate - targetRate) > 0.05) {
+        this.bgVideoElement.playbackRate = targetRate;
+      }
+    }
     this.drawEffectsBack(phase);
     this.drawObstaclesPixi(state);
     // this.drawPursuersPixi(phase, state);
@@ -222,7 +242,7 @@ export class RoadScene {
     else if (phase >= 4) { this.glowFilter.color = 0xEA580C; this.glowFilter.distance = 15; this.glowFilter.outerStrength = 3; }
     else if (phase >= 3) { this.glowFilter.color = 0xEAB308; this.glowFilter.distance = 10; this.glowFilter.outerStrength = 2; }
     else if (phase >= 2) { this.glowFilter.color = 0x16A34A; this.glowFilter.distance = 6; this.glowFilter.outerStrength = 1; }
-    else { this.glowFilter.distance = 0; this.glowFilter.outerStrength = 0; }
+    else { this.glowFilter.color = 0x2563EB; this.glowFilter.distance = 4; this.glowFilter.outerStrength = 0.6; }
   }
 
   // ═══════════════════════════════════════════════════════
@@ -232,14 +252,27 @@ export class RoadScene {
   private drawBackground(phase: number, state: GameState): void {
     const ctx = this.bgCtx;
     ctx.clearRect(0, 0, W, H);
-    this.drawSky(ctx, phase);
-    this.drawStars(ctx, phase);
-    this.drawDistantSkyline(ctx, phase);
-    if (this.skylineFog) this.drawSkylineFog(ctx, phase);
-    // this.drawSideFacades(ctx, phase, state);
-    this.drawRoad(ctx, phase, state);
-    // this.drawStreetLamps(ctx, phase);
+
+    if (this.videoBgSprite) {
+      this.videoBgSprite.visible = this.useVideoBackground;
+    }
+    if (this.videoBgSprite && this.useVideoBackground) {
+      // Video handles sky, buildings, road — only draw overlays
+      this.drawRoadOverlays(ctx, phase, state);
+    } else {
+      // Fallback: full canvas rendering
+      this.drawSky(ctx, phase);
+      this.drawStars(ctx, phase);
+      this.drawDistantSkyline(ctx, phase);
+      if (this.skylineFog) this.drawSkylineFog(ctx, phase);
+      this.drawRoad(ctx, phase, state);
+    }
     if (phase >= 2) this.drawPuddles(ctx, phase);
+  }
+
+  /** Draw only the overlays on top of the video background */
+  private drawRoadOverlays(ctx: CanvasRenderingContext2D, _phase: number, state: GameState): void {
+    this.roadOffset = (this.roadOffset + (2 + state.chasePhase * 1.5)) % 60;
   }
 
   // ── Sky ──
@@ -385,6 +418,44 @@ export class RoadScene {
         }
         t += spacing;
       }
+    }
+  }
+
+  private drawLaneDashes(ctx: CanvasRenderingContext2D, state: GameState): void {
+    const obstacleSpeed = [0.007, 0.012, 0.018, 0.026, 0.042][state.chasePhase - 1];
+    {
+      const dashSpeed = (state.phase === 'RUNNING' || this.serverRoundRunning) ? obstacleSpeed : 0.005;
+      this.laneDashOffset = (this.laneDashOffset + dashSpeed) % 1;
+    }
+    const dashT = 0.06;
+    const gapT = 0.08;
+    const cycleT = dashT + gapT;
+
+    for (const frac of [1 / 3, 2 / 3]) {
+      const topX = ROAD_L_HOR + (ROAD_R_HOR - ROAD_L_HOR) * frac;
+      const botX = -200 + (W + 400) * frac;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,255,100,0.35)';
+
+      let t = -(cycleT - this.laneDashOffset % cycleT);
+      while (t < 1) {
+        const t0 = Math.max(0, t);
+        const t1 = Math.min(1, t + dashT);
+        if (t1 > t0) {
+          const x0 = topX + (botX - topX) * t0;
+          const x1 = topX + (botX - topX) * t1;
+          const y0 = HORIZON_Y + (H - HORIZON_Y) * t0;
+          const y1 = HORIZON_Y + (H - HORIZON_Y) * t1;
+          ctx.lineWidth = 0.5 + t0 * 2.5;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+        }
+        t += cycleT;
+      }
+      ctx.restore();
     }
   }
 
@@ -689,42 +760,7 @@ export class RoadScene {
       ctx.restore();
     }
 
-    // Lane dividers — dashed in rz space, same speed as obstacles
-    const obstacleSpeed = [0.007, 0.012, 0.018, 0.026, 0.042][state.chasePhase - 1];
-    {
-      const dashSpeed = (state.phase === 'RUNNING' || this.serverRoundRunning) ? obstacleSpeed : 0.005;
-      this.laneDashOffset = (this.laneDashOffset + dashSpeed) % 1;
-    }
-    const dashT = 0.06;
-    const gapT = 0.08;
-    const cycleT = dashT + gapT;
-
-    for (const frac of [1 / 3, 2 / 3]) {
-      const topX = ROAD_L_HOR + (ROAD_R_HOR - ROAD_L_HOR) * frac;
-      const botX = -200 + (W + 400) * frac;
-
-      ctx.save();
-      ctx.strokeStyle = 'rgba(0,255,100,0.35)';
-
-      let t = -(cycleT - this.laneDashOffset % cycleT);
-      while (t < 1) {
-        const t0 = Math.max(0, t);
-        const t1 = Math.min(1, t + dashT);
-        if (t1 > t0) {
-          const x0 = topX + (botX - topX) * t0;
-          const x1 = topX + (botX - topX) * t1;
-          const y0 = HORIZON_Y + (H - HORIZON_Y) * t0;
-          const y1 = HORIZON_Y + (H - HORIZON_Y) * t1;
-          ctx.lineWidth = 0.5 + t0 * 2.5;
-          ctx.beginPath();
-          ctx.moveTo(x0, y0);
-          ctx.lineTo(x1, y1);
-          ctx.stroke();
-        }
-        t += cycleT;
-      }
-      ctx.restore();
-    }
+    this.drawLaneDashes(ctx, state);
 
     // Horizon fog — road fades into the skyline
     if (this.roadFog) {
@@ -828,37 +864,38 @@ export class RoadScene {
   private drawObstaclesPixi(state: GameState): void {
     this.obstacleGfx.clear();
     this.obstacleGfx.removeChildren();
+    this.obstacleContainer.removeChildren();
     const speed = [0.007, 0.012, 0.018, 0.026, 0.042][state.chasePhase - 1];
-
-    // if (state.phase === 'RUNNING' && Math.random() < 0.02 + state.chasePhase * 0.005) this.spawnObstacle();
-    // if (state.phase === 'RUNNING' && state.chasePhase <= 3 && Math.random() < 0.003) this.spawnNitro();
 
     this.obstacles = this.obstacles.filter(o => o.rz < 1.15);
     this.obstacles.sort((a, b) => a.rz - b.rz);
 
     for (const o of this.obstacles) {
-      if (state.phase === 'RUNNING' || this.serverRoundRunning) o.rz += speed;
+      if (state.phase === 'RUNNING' || this.serverRoundRunning) o.rz += speed * (0.2 + o.rz * 1.5);
       const { x, y, scale } = roadToScreen(o.rx, o.rz);
-      const wide = o.lanes === 2;
-      if (o.type === 'police') this.drawPoliceCarPixi(x, y, scale, this.obstacleGfx, o.rx, o.rz);
-      else if (o.type === 'barricade') wide ? this.drawBarricadeWidePixi(x, y, scale) : this.drawBarricadePixi(x, y, scale);
-      else if (o.type === 'spikes') wide ? this.drawSpikesWidePixi(x, y, scale) : this.drawSpikesPixi(x, y, scale);
-      else if (o.type === 'dumpster') this.drawDumpsterPixi(x, y, scale);
-      else if (o.type === 'cones') this.drawConesPixi(x, y, scale);
-      else if (o.type === 'flipped_car') wide ? this.drawFlippedTruckPixi(x, y, scale) : this.drawFlippedCarPixi(x, y, scale);
-      else if (o.type === 'electric_puddle') wide ? this.drawElectricPuddleWidePixi(x, y, scale) : this.drawElectricPuddlePixi(x, y, scale);
-    }
 
-    this.nitros = this.nitros.filter(n => n.rz < 1.1 && !n.collected);
-    for (const n of this.nitros) {
-      if (state.phase === 'RUNNING' || this.serverRoundRunning) n.rz += speed * 0.9;
-      n.glow = (n.glow + 0.1) % (Math.PI * 2);
-      const { x, y, scale } = roadToScreen(n.rx, n.rz);
-      const glow = Math.sin(n.glow);
-      const r = 8 * scale + glow * 3;
-      this.obstacleGfx.circle(x, y, r * 2).fill({ color: 0xEA580C, alpha: 0.1 });
-      this.obstacleGfx.circle(x, y, r).fill({ color: 0xEA580C, alpha: 0.9 });
-      this.obstacleGfx.circle(x, y, r * 0.5).fill({ color: 0xFFFFFF, alpha: 0.5 });
+      // Try sprite-based rendering
+      const texKey = o.lanes === 2 && o.type === 'flipped_car' ? 'truck' : o.type;
+      const tex = this.useObstacleSprites ? this.obstacleTextures.get(texKey) : undefined;
+
+      if (tex) {
+        const spr = new Sprite(tex);
+        spr.anchor.set(0.5, 0.5);
+        spr.x = x;
+        spr.y = y;
+        const s = this.obstacleScale * scale * (o.lanes === 2 ? 1.6 : 1);
+        spr.scale.set(s);
+        this.obstacleContainer.addChild(spr);
+      } else {
+        // Fallback: procedural
+        const wide = o.lanes === 2;
+        if (o.type === 'police') this.drawPoliceCarPixi(x, y, scale, this.obstacleGfx, o.rx, o.rz);
+        else if (o.type === 'barricade') wide ? this.drawBarricadeWidePixi(x, y, scale) : this.drawBarricadePixi(x, y, scale);
+        else if (o.type === 'spikes') wide ? this.drawSpikesWidePixi(x, y, scale) : this.drawSpikesPixi(x, y, scale);
+        else if (o.type === 'dumpster') this.drawDumpsterPixi(x, y, scale);
+        else if (o.type === 'cones') this.drawConesPixi(x, y, scale);
+        else if (o.type === 'flipped_car') wide ? this.drawFlippedTruckPixi(x, y, scale) : this.drawFlippedCarPixi(x, y, scale);
+      }
     }
   }
 
@@ -1243,24 +1280,87 @@ export class RoadScene {
 
   // ── Kash Rider (sprite) ──
 
-  async loadRiderSprite(): Promise<void> {
+  async loadObstacleSprites(): Promise<void> {
     const { Assets } = await import('pixi.js');
-    const texture = await Assets.load({
-      src: '/src/assets/kash-en-moto.webp',
+    const map: Record<string, string> = {
+      'barricade': '/assets/obstacle-barricade.webp',
+      'dumpster': '/assets/obstacle-dumpster.webp',
+      'cones': '/assets/obstacle-cones.webp',
+      'flipped_car': '/assets/obstacle-flipped-car.webp',
+      'spikes': '/assets/obstacle-spikes.webp',
+      'police': '/assets/obstacle-police.webp',
+      'truck': '/assets/obstacle-truck.webp',
+      'manhole': '/assets/obstacle-manhole.webp',
+    };
+    for (const [key, src] of Object.entries(map)) {
+      const tex = await Assets.load({ src, data: { scaleMode: 'linear', autoGenerateMipmaps: true } });
+      this.obstacleTextures.set(key, tex);
+    }
+  }
+
+  async loadVideoBackground(): Promise<void> {
+    const video = document.createElement('video');
+    video.src = '/assets/road-bg.webm';
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    await video.play();
+
+    const { VideoSource } = await import('pixi.js');
+    const videoSource = new VideoSource({ resource: video, autoPlay: true });
+    const texture = new Texture({ source: videoSource });
+    this.videoBgSprite = new Sprite(texture);
+    this.videoBgSprite.width = W;
+    this.videoBgSprite.height = H;
+    this.bgVideoElement = video;
+    this.container.addChildAt(this.videoBgSprite, 0);
+  }
+
+  async loadRiderSprite(): Promise<void> {
+    const { Assets, VideoSource } = await import('pixi.js');
+
+    // Load video version
+    const video = document.createElement('video');
+    video.src = '/assets/kash-rider.webm';
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    await video.play();
+    const videoSource = new VideoSource({ resource: video, autoPlay: true });
+    this.riderVideoSprite = new Sprite(new Texture({ source: videoSource }));
+    this.riderVideoSprite.anchor.set(0.5, 0.5);
+
+    // Load image version
+    const imgTexture = await Assets.load({
+      src: '/assets/kash-en-moto.webp',
       data: { scaleMode: 'linear', autoGenerateMipmaps: true },
     });
-    this.riderSprite = new Sprite(texture);
-    this.riderSprite.anchor.set(0.5, 1);
-    this.riderContainer.addChild(this.riderSprite);
+    this.riderImageSprite = new Sprite(imgTexture);
+    this.riderImageSprite.anchor.set(0.5, 1);
+    this.riderImageSprite.visible = false;
+
+    this.riderContainer.addChild(this.riderVideoSprite);
+    this.riderContainer.addChild(this.riderImageSprite);
+    this.riderSprite = this.riderVideoSprite;
+  }
+
+  setRiderVideo(useVideo: boolean): void {
+    if (!this.riderVideoSprite || !this.riderImageSprite) return;
+    this.riderVideoSprite.visible = useVideo;
+    this.riderImageSprite.visible = !useVideo;
+    this.riderSprite = useVideo ? this.riderVideoSprite : this.riderImageSprite;
   }
 
   private updateRiderSprite(state: GameState): void {
     if (!this.riderSprite) return;
 
-    // Animate toward target lane
+    // Animate toward target lane — faster in higher phases
+    const laneSpeed = 0.08 + state.chasePhase * 0.03;
     const diff = this.riderLane - this.riderLaneActual;
     if (Math.abs(diff) > 0.001) {
-      this.riderLaneActual += diff * this.riderLaneSpeed;
+      this.riderLaneActual += diff * laneSpeed;
     } else {
       this.riderLaneActual = this.riderLane;
     }
@@ -1277,10 +1377,8 @@ export class RoadScene {
     const sway = Math.sin(Date.now() / 700) * 0.02;
     const p = roadToScreen(this.riderLaneActual + sway, rz);
 
-    // Scale sprite to fit ~1 lane width
-    const laneWidth = (ROAD_R_BOT - ROAD_L_BOT) * rz + (ROAD_R_HOR - ROAD_L_HOR) * (1 - rz);
-    const targetW = laneWidth / 3 * 0.7;
-    const spriteScale = targetW / (this.riderSprite.texture.width || 400);
+    // Scale
+    const spriteScale = this.riderScale * p.scale;
 
     // Tilt during lane change
     const tilt = -(this.riderLane - this.riderLaneActual) * 1.2;
@@ -1288,7 +1386,7 @@ export class RoadScene {
     this.riderSprite.rotation = Math.max(-maxTilt, Math.min(maxTilt, tilt));
 
     this.riderSprite.x = p.x;
-    this.riderSprite.y = p.y;
+    this.riderSprite.y = p.y + this.riderYOffset;
     this.riderSprite.scale.set(spriteScale);
 
     // Darken Kash when it rains + siren color tint (phase 2+)
@@ -1624,7 +1722,7 @@ export class RoadScene {
     const colors = ['#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#e67e22', '#7f8c8d', '#f39c12'];
 
     // Types that can span 2 lanes (wide obstacles)
-    const widePossible: Obstacle['type'][] = ['barricade', 'spikes', 'flipped_car', 'electric_puddle'];
+    const widePossible: Obstacle['type'][] = ['barricade', 'spikes', 'flipped_car'];
     // 2-lane positions: centered between two adjacent lanes
     const dualLanePositions = [-0.333, 0.333]; // between left-center, between center-right
 

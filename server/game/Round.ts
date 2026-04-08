@@ -5,14 +5,14 @@ export interface RoundEvents {
   onTick(multiplier: number, elapsed: number, chasePhase: ChasePhase): void;
   onCrash(crashPoint: number, hash: string): void;
   onPhaseChange(phase: ChasePhase): void;
-  onObstacle(type: string, lane: number, lanes: number): void;
+  onObstacle(type: string, lane: number, lanes: number, rz?: number): void;
   onKashMove(lane: number): void;
 }
 
-const OBSTACLE_TYPES = ['barricade', 'spikes', 'dumpster', 'cones', 'flipped_car', 'electric_puddle'];
-const WIDE_TYPES = ['barricade', 'spikes', 'flipped_car', 'electric_puddle'];
+const OBSTACLE_TYPES = ['barricade', 'spikes', 'dumpster', 'cones', 'manhole'];
+const WIDE_TYPES: string[] = [];
 const OBSTACLE_LANES = [-0.667, 0, 0.667];
-const KASH_LANES = [-0.5, 0, 0.5];
+const KASH_LANES = [-0.8, -0.05, 0.7];
 
 export class Round {
   public id: number;
@@ -27,6 +27,7 @@ export class Round {
   private events: RoundEvents;
   private kashLane = 0;
   private lastObstacleAt = 0;
+  private pendingDodge: ReturnType<typeof setTimeout> | null = null;
 
   constructor(id: number, crashPoint: number, hash: string, events: RoundEvents) {
     this.id = id;
@@ -66,8 +67,10 @@ export class Round {
       this.events.onPhaseChange(newPhase);
     }
 
-    // Spawn obstacles as visual drama
-    this.maybeSpawnObstacle();
+    // Spawn obstacles — but not if we're about to crash (within 10% of crash point)
+    if (this.multiplier < this.crashPoint * 0.9) {
+      this.maybeSpawnObstacle();
+    }
 
     // Emit tick
     this.events.onTick(this.multiplier, elapsed, this.chasePhase);
@@ -75,30 +78,52 @@ export class Round {
 
   private maybeSpawnObstacle(): void {
     const now = Date.now();
-    // Obstacles more frequent in higher phases
-    const interval = [3000, 2000, 1200, 800][this.chasePhase - 1];
+    const interval = [1200, 800, 500, 350, 250][this.chasePhase - 1];
 
     if (now - this.lastObstacleAt < interval) return;
-    if (Math.random() > 0.4) return;
+    if (Math.random() > 0.7) return;
 
     this.lastObstacleAt = now;
 
-    const isWide = this.chasePhase >= 3 && Math.random() < 0.25;
-    const type = isWide
-      ? WIDE_TYPES[Math.floor(Math.random() * WIDE_TYPES.length)]
-      : OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
-    const lane = isWide
-      ? [-0.333, 0.333][Math.floor(Math.random() * 2)]
-      : OBSTACLE_LANES[Math.floor(Math.random() * OBSTACLE_LANES.length)];
+    // How many obstacles? More likely in higher phases
+    const multiChance = [0.15, 0.25, 0.35, 0.45, 0.5][this.chasePhase - 1];
+    const count = Math.random() < multiChance ? 2 : 1;
 
-    this.events.onObstacle(type, lane, isWide ? 2 : 1);
+    // Pick all lanes first
+    const usedLanes: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const availableLanes = OBSTACLE_LANES.filter(l => !usedLanes.some(u => Math.abs(u - l) < 0.3));
+      if (availableLanes.length === 0) break;
+      usedLanes.push(availableLanes[Math.floor(Math.random() * availableLanes.length)]);
+    }
 
-    // Kash auto-dodges: move to a different lane
-    if (Math.random() < 0.6) {
-      const safeLanes = KASH_LANES.filter(l => Math.abs(l - lane) > 0.3);
+    // Spawn all obstacles immediately
+    for (const l of usedLanes) {
+      const type = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
+      this.events.onObstacle(type, l, 1);
+    }
+
+    // Kash only moves when in danger
+    const inDanger = usedLanes.some(l => Math.abs(this.kashLane - l) < 0.4);
+    if (inDanger) {
+      const safeLanes = KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > 0.3));
       if (safeLanes.length > 0) {
-        this.kashLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
-        this.events.onKashMove(this.kashLane);
+        const newLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
+        // Slow phases: delay dodge for drama. Fast phases: instant
+        const delay = this.chasePhase <= 2 ? 150 + Math.random() * 100 : 0;
+        if (delay > 0) {
+          if (this.pendingDodge) clearTimeout(this.pendingDodge);
+          this.pendingDodge = setTimeout(() => {
+            this.pendingDodge = null;
+            if (this.phase === 'RUNNING') {
+              this.kashLane = newLane;
+              this.events.onKashMove(newLane);
+            }
+          }, delay);
+        } else {
+          this.kashLane = newLane;
+          this.events.onKashMove(newLane);
+        }
       }
     }
   }
@@ -106,7 +131,23 @@ export class Round {
   private crash(): void {
     this.phase = 'CRASHED';
     this.stop();
-    this.events.onCrash(this.crashPoint, this.hash);
+    if (this.pendingDodge) { clearTimeout(this.pendingDodge); this.pendingDodge = null; }
+
+    // Spawn crash obstacle exactly in Kash's lane
+    const crashType = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
+    const crashLane = this.kashLane;
+
+    if (this.crashPoint <= 1.00) {
+      // Instant crash — no obstacle, engine didn't start
+      this.events.onCrash(this.crashPoint, this.hash);
+    } else {
+      // Spawn obstacle from the horizon — delay scales with phase speed
+      this.events.onObstacle(crashType, crashLane, 1, 0);
+      const delay = [1000, 600, 380, 300, 200][this.chasePhase - 1];
+      setTimeout(() => {
+        this.events.onCrash(this.crashPoint, this.hash);
+      }, delay);
+    }
   }
 
   stop(): void {

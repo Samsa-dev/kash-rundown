@@ -12,7 +12,8 @@ import './styles/main.css';
 const engine = new GameEngine();
 const roadScene = new RoadScene();
 const dialogue = new DialogueSystem();
-const client = new GameClient('ws://localhost:3001');
+const WS_URL = import.meta.env.VITE_WS_URL || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':3001';
+const client = new GameClient(WS_URL);
 
 // ── State ──
 let autoCashOut = false;
@@ -41,6 +42,8 @@ async function init() {
 
   document.getElementById('pixi-container')!.appendChild(app.canvas);
   app.stage.addChild(roadScene.container);
+  await roadScene.loadVideoBackground();
+  await roadScene.loadObstacleSprites();
   await roadScene.loadRiderSprite();
 
   loadBar.style.width = '70%';
@@ -130,11 +133,15 @@ function wireServerEvents() {
       pendingBet = null;
     }
 
+    // Clear crash obstacle and reset
+    roadScene.clearGameObjects();
+
     // Ensure button is in bet mode and controls enabled
     setMainButton('bet');
     setBetControlsEnabled(true);
 
     startCountdown(msg.seconds as number);
+    startBetTicker();
   });
 
   // ── Server accepted our bet ──
@@ -160,7 +167,16 @@ function wireServerEvents() {
   });
 
   client.on('bet:rejected', (msg) => {
-    showFloatingText(msg.reason as string, '#EF4444', W / 2, 500);
+    const reason = msg.reason as string;
+    if (reason === 'Round not accepting bets') {
+      // Auto-queue for next round instead of showing error
+      const amount = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
+      pendingBet = amount;
+      setMainButton('queued', amount);
+      setBetControlsEnabled(false);
+    } else {
+      showFloatingText(reason, '#EF4444', W / 2, 500);
+    }
   });
 
   // ── Multiplier tick (round is running) ──
@@ -181,6 +197,7 @@ function wireServerEvents() {
       serverRunning = true;
       roadScene.serverRoundRunning = true;
       setRoundStatus('in-play');
+      stopBetTicker();
       Audio.initAudio();
       Audio.startEngine();
 
@@ -258,7 +275,12 @@ function wireServerEvents() {
     setRoundStatus('crash');
     Audio.stopEngine();
     roadScene.spawnCrashParticles();
-    roadScene.clearGameObjects();
+    // Keep only the crash obstacle (the last one spawned, closest to Kash)
+    if (roadScene.obstacles.length > 0) {
+      const last = roadScene.obstacles[roadScene.obstacles.length - 1];
+      roadScene.obstacles.length = 0;
+      roadScene.obstacles.push(last);
+    }
     Audio.playCrash();
     flashScreen('#EF4444', 600);
     showCrashDisplay(crashPoint);
@@ -286,8 +308,14 @@ function wireServerEvents() {
     }, 800);
 
     // Re-enable controls for next round
-    setMainButton('bet');
-    setBetControlsEnabled(true);
+    if (pendingBet !== null) {
+      // Keep queued state
+      setMainButton('queued', pendingBet);
+      setBetControlsEnabled(false);
+    } else {
+      setMainButton('bet');
+      setBetControlsEnabled(true);
+    }
   });
 
   // ── Obstacles & Kash movement from server ──
@@ -295,7 +323,8 @@ function wireServerEvents() {
     roadScene.obstacles.push({
       type: msg.obstacleType as any,
       rx: msg.lane as number,
-      rz: 0.02, speed: 0, color: '#EF4444',
+      rz: (msg.rz as number) || 0.02,
+      speed: 0, color: '#EF4444',
       lanes: msg.lanes as number,
     });
   });
@@ -304,7 +333,11 @@ function wireServerEvents() {
     roadScene.riderLane = msg.lane as number;
   });
 
-  client.on('players', () => {});
+  client.on('players', (msg) => {
+    const realBet = msg.totalBet as number;
+    const simBets = realBet + 3000 + Math.floor(Math.random() * 1000);
+    $('total-bets').textContent = '$' + simBets.toLocaleString();
+  });
 }
 
 // ══════════════════════════════════════
@@ -332,13 +365,13 @@ function placeBet(): void {
   if (amount > engine.state.balance) { showFloatingText('Insufficient balance', '#EF4444', W / 2, 500); return; }
   if (amount < 1) { showFloatingText('Minimum bet: $1.00', '#EF4444', W / 2, 500); return; }
 
-  if (serverRunning) {
-    // Round in progress — queue for next
+  if (serverRunning || engine.state.phase === 'CRASHED' || engine.state.phase === 'CASHED_OUT') {
+    // Round in progress or between rounds — queue for next
     pendingBet = amount;
     setMainButton('queued', amount);
     setBetControlsEnabled(false);
   } else {
-    // Send directly
+    // Countdown active or idle — send directly
     client.placeBet(amount);
   }
 }
@@ -356,16 +389,16 @@ function setMainButton(state: BtnState, amount?: number): void {
   btn.style.pointerEvents = '';
 
   switch (state) {
-    case 'bet':
+    case 'bet': {
+      const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
       if (serverRunning) {
         btn.classList.add('bet-next-mode');
-        const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
-        btn.innerHTML = 'BET NEXT ROUND — $<span id="btn-bet-amount">' + val.toFixed(2) + '</span>';
+        btn.innerHTML = 'BET NEXT ROUND<span style="font-size:13px;font-weight:400;letter-spacing:1px;opacity:0.9;display:block" id="btn-bet-amount">$' + val.toFixed(2) + '</span>';
       } else {
-        const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
-        btn.innerHTML = 'PLACE BET — $<span id="btn-bet-amount">' + val.toFixed(2) + '</span>';
+        btn.innerHTML = 'PLACE BET<span style="font-size:13px;font-weight:400;letter-spacing:1px;opacity:0.9;display:block" id="btn-bet-amount">$' + val.toFixed(2) + '</span>';
       }
       break;
+    }
     case 'placed':
       btn.classList.add('placed-mode');
       btn.innerHTML = 'BET PLACED<span style="font-size:13px;font-weight:400;letter-spacing:1px;opacity:0.9;display:block">$' + (amount ?? 0).toFixed(2) + ' — tap to cancel</span>';
@@ -419,6 +452,22 @@ function resetUI(): void {
 }
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
+let betTickerInterval: ReturnType<typeof setInterval> | null = null;
+
+function startBetTicker(): void {
+  if (betTickerInterval) clearInterval(betTickerInterval);
+  let simTotal = 2000 + Math.floor(Math.random() * 500);
+  $('total-bets').textContent = '$' + simTotal.toLocaleString();
+  betTickerInterval = setInterval(() => {
+    simTotal += Math.floor(30 + Math.random() * 120);
+    $('total-bets').textContent = '$' + simTotal.toLocaleString();
+  }, 300 + Math.random() * 400);
+}
+
+function stopBetTicker(): void {
+  if (betTickerInterval) { clearInterval(betTickerInterval); betTickerInterval = null; }
+}
+
 function startCountdown(seconds = 5): void {
   if (countdownInterval) clearInterval(countdownInterval);
   const overlay = $('countdown-overlay');
@@ -472,10 +521,6 @@ function updateHistory(): void {
 
 function updateStats(): void {
   $('best-run').textContent = engine.state.bestRun ? engine.state.bestRun.toFixed(2) + '×' : '—';
-  const pnl = engine.state.sessionProfit;
-  const pnlEl = $('session-pnl');
-  pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(2);
-  pnlEl.style.color = pnl >= 0 ? 'var(--go-green)' : 'var(--siren-red)';
   $('round-count').textContent = String(engine.state.sessionRounds);
 }
 
@@ -483,7 +528,7 @@ function updateBetDisplay(): void {
   if (btnState === 'bet') {
     const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
     const el = document.getElementById('btn-bet-amount');
-    if (el) el.textContent = val.toFixed(2);
+    if (el) el.textContent = '$' + val.toFixed(2);
   }
 }
 
@@ -534,10 +579,11 @@ function showFloatingText(text: string, color: string, x: number, y: number): vo
   el.addEventListener('animationend', () => el.remove());
 }
 
-function showCrashDisplay(_crashPoint: number): void {
+function showCrashDisplay(crashPoint: number): void {
   const el = $('crash-display');
+  el.textContent = crashPoint <= 1.00 ? "ENGINE STALLED" : "CRASHED";
   el.classList.remove('visible');
-  void el.offsetWidth; // force reflow to restart animation
+  void el.offsetWidth;
   el.classList.add('visible');
   $('wrap').classList.add('shake');
   setTimeout(() => $('wrap').classList.remove('shake'), 400);

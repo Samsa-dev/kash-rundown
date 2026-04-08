@@ -7,3 +7,10 @@ dist/
 !.env.example
 .DS_Store
 Thumbs.db
+
+# Original unoptimized assets
+src/assets/*.png
+src/assets/*.PNG
+src/assets/*.mp4
+src/assets/*.mov
+src/assets/*.MOV

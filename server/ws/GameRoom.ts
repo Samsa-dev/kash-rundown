@@ -134,8 +134,8 @@ export class GameRoom {
       onPhaseChange: (_phase: ChasePhase) => {
         // Phase changes are derived client-side from multiplier
       },
-      onObstacle: (obstacleType, lane, lanes) => {
-        this.broadcast({ type: 'obstacle:spawn', obstacleType, lane, lanes });
+      onObstacle: (obstacleType, lane, lanes, rz?) => {
+        this.broadcast({ type: 'obstacle:spawn', obstacleType, lane, lanes, rz });
       },
       onKashMove: (lane) => {
         this.broadcast({ type: 'kash:move', lane });

@@ -272,14 +272,18 @@
     <h2>Road Geometry</h2>
     <div class="control-row">
       <label>Horizon width</label>
-      <input type="range" id="horizon-width" min="0" max="180" step="1" value="8">
-      <span class="val" id="horizon-val">8</span>
+      <input type="range" id="horizon-width" min="0" max="180" step="1" value="0">
+      <span class="val" id="horizon-val">0</span>
     </div>
   </div>
 
   <!-- Toggles -->
   <div class="section">
     <h2>Scene Flags</h2>
+    <div class="toggle-row">
+      <label>Video background</label>
+      <input type="checkbox" id="toggle-video" checked>
+    </div>
     <div class="toggle-row">
       <label>Helicopter active</label>
       <input type="checkbox" id="toggle-heli">
@@ -303,14 +307,42 @@
       <span class="val" id="lane-val">0.00</span>
     </div>
     <div class="phase-btns" id="lane-btns">
-      <button data-lane="-0.5">Left</button>
+      <button data-lane="-0.8">Left</button>
       <button data-lane="0" class="active">Center</button>
-      <button data-lane="0.5">Right</button>
+      <button data-lane="0.7">Right</button>
     </div>
     <div class="control-row">
       <label>Depth (rz)</label>
       <input type="range" id="depth-slider" min="0" max="1" step="0.01" value="0.6">
       <span class="val" id="depth-val">0.60</span>
+    </div>
+    <div class="toggle-row">
+      <label>Use video</label>
+      <input type="checkbox" id="toggle-kash-video" checked>
+    </div>
+    <div class="control-row">
+      <label>Scale</label>
+      <input type="range" id="kash-scale" min="0.05" max="2" step="0.01" value="0.7">
+      <span class="val" id="kash-scale-val">0.70</span>
+    </div>
+    <div class="control-row">
+      <label>Y offset</label>
+      <input type="range" id="kash-yoff" min="-200" max="200" step="1" value="0">
+      <span class="val" id="kash-yoff-val">0</span>
+    </div>
+  </div>
+
+  <!-- Obstacles -->
+  <div class="section">
+    <h2>Obstacles</h2>
+    <div class="toggle-row">
+      <label>Use sprites</label>
+      <input type="checkbox" id="toggle-obs-sprites" checked>
+    </div>
+    <div class="control-row">
+      <label>Scale</label>
+      <input type="range" id="obs-scale" min="0.02" max="0.5" step="0.01" value="0.15">
+      <span class="val" id="obs-scale-val">0.15</span>
     </div>
   </div>
 
@@ -323,7 +355,6 @@
       <button class="btn-green" id="spawn-dumpster">Dumpster</button>
       <button class="btn-orange" id="spawn-cones">Cones</button>
       <button class="btn-blue" id="spawn-flipped">Flipped Car</button>
-      <button class="btn-blue" id="spawn-electric">Electric</button>
       <button class="btn-purple" id="spawn-nitro">Nitro</button>
     </div>
     <div class="action-btns" style="margin-top:6px">
@@ -369,8 +400,7 @@
     <h2>Simulation</h2>
     <div class="control-row">
       <label>Crash at ×</label>
-      <input type="range" id="sim-crash" min="1" max="200" step="0.5" value="10">
-      <span class="val" id="sim-crash-val">10.0×</span>
+      <input type="number" id="sim-crash" min="1" max="10000" step="0.1" value="10" style="width:80px;background:var(--card-bg,#141414);border:1px solid #333;border-radius:6px;color:#EA580C;font-family:'JetBrains Mono',monospace;font-size:13px;text-align:center;padding:4px;outline:none;">
     </div>
     <div class="control-row">
       <label>Speed</label>

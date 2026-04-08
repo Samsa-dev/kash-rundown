@@ -3,10 +3,17 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GameRoom } from './ws/GameRoom';
 
-const PORT = 3001;
+const PORT = parseInt(process.env.PORT || '3001', 10);
 
 const app = express();
 app.use(express.json());
+
+// CORS for production
+app.use((_req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+});
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -33,7 +40,6 @@ wss.on('connection', (ws: WebSocket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`🎰 Kash Rundown server on http://localhost:${PORT}`);
-  console.log(`   WebSocket on ws://localhost:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`🎰 Kash Rundown server on port ${PORT}`);
 });

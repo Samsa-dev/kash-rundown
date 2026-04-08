@@ -32,7 +32,7 @@ export type ServerMessage =
   | { type: 'bet:cancelled'; refund: number; balance: number }
   | { type: 'cashOut:confirmed'; amount: number; multiplier: number; balance: number }
   | { type: 'players'; count: number; totalBet: number }
-  | { type: 'obstacle:spawn'; obstacleType: string; lane: number; lanes: number }
+  | { type: 'obstacle:spawn'; obstacleType: string; lane: number; lanes: number; rz?: number }
   | { type: 'kash:move'; lane: number }
   | { type: 'welcome'; balance: number; playerId: string }
   | { type: 'history'; entries: { roundId: number; crashPoint: number; hash: string }[] };

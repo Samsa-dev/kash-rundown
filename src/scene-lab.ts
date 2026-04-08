@@ -39,6 +39,8 @@ async function init() {
     updateStateDisplay();
   });
 
+  await roadScene.loadVideoBackground();
+  await roadScene.loadObstacleSprites();
   await roadScene.loadRiderSprite();
   wireControls();
 }
@@ -91,6 +93,9 @@ function wireControls() {
   });
 
   // Toggles
+  ($('toggle-video') as HTMLInputElement).addEventListener('change', (e) => {
+    roadScene.useVideoBackground = (e.target as HTMLInputElement).checked;
+  });
   ($('toggle-heli') as HTMLInputElement).addEventListener('change', (e) => {
     state.helicopterActive = (e.target as HTMLInputElement).checked;
     if (state.helicopterActive) state.heliStartTime = Date.now();
@@ -153,11 +158,10 @@ function wireControls() {
   $('spawn-dumpster').addEventListener('click', () => spawnObs('dumpster'));
   $('spawn-cones').addEventListener('click', () => spawnObs('cones'));
   $('spawn-flipped').addEventListener('click', () => spawnObs('flipped_car'));
-  $('spawn-electric').addEventListener('click', () => spawnObs('electric_puddle'));
 
   // 2-lane wide obstacle
-  const wideTypes: Array<'barricade' | 'spikes' | 'flipped_car' | 'electric_puddle'> =
-    ['barricade', 'spikes', 'flipped_car', 'electric_puddle'];
+  const wideTypes: Array<'barricade' | 'spikes' | 'flipped_car'> =
+    ['barricade', 'spikes', 'flipped_car'];
   const dualLanePositions = [-0.333, 0.333];
   $('spawn-wide').addEventListener('click', () => {
     roadScene.obstacles.push({
@@ -190,6 +194,33 @@ function wireControls() {
     roadScene.clearGameObjects();
   });
 
+  // Obstacle sprite controls
+  ($('toggle-obs-sprites') as HTMLInputElement).addEventListener('change', (e) => {
+    roadScene.useObstacleSprites = (e.target as HTMLInputElement).checked;
+  });
+  ($('obs-scale') as HTMLInputElement).addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    roadScene.obstacleScale = val;
+    $('obs-scale-val').textContent = val.toFixed(2);
+  });
+
+  // Kash video/image toggle
+  ($('toggle-kash-video') as HTMLInputElement).addEventListener('change', (e) => {
+    roadScene.setRiderVideo((e.target as HTMLInputElement).checked);
+  });
+
+  // Kash scale & offset
+  ($('kash-scale') as HTMLInputElement).addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    roadScene.riderScale = val;
+    $('kash-scale-val').textContent = val.toFixed(2);
+  });
+  ($('kash-yoff') as HTMLInputElement).addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    roadScene.riderYOffset = val;
+    $('kash-yoff-val').textContent = String(val);
+  });
+
   // Speed lines controls
   ($('sl-height') as HTMLInputElement).addEventListener('input', (e) => {
     const val = parseFloat((e.target as HTMLInputElement).value);
@@ -217,28 +248,39 @@ function wireControls() {
   let simLastPhase = 1;
 
   simCrashSlider.addEventListener('input', () => {
-    simCrashPoint = parseFloat(simCrashSlider.value);
-    $('sim-crash-val').textContent = simCrashPoint.toFixed(1) + '×';
+    simCrashPoint = parseFloat(simCrashSlider.value) || 10;
   });
   simSpeedSlider.addEventListener('input', () => {
     simSpeed = parseFloat(simSpeedSlider.value);
     $('sim-speed-val').textContent = simSpeed.toFixed(1) + '×';
   });
 
+  const OBSTACLE_TYPES = ['barricade', 'spikes', 'dumpster', 'cones', 'manhole'];
+  const OBSTACLE_LANES = [-0.667, 0, 0.667];
+  const SIM_KASH_LANES = [-0.8, -0.05, 0.7];
+  let simKashLane = -0.05;
+  let simLastObstacleAt = 0;
+  let simCrashing = false;
+
   $('sim-start').addEventListener('click', () => {
-    // Reset
     if (simInterval) clearInterval(simInterval);
     simElapsed = 0;
     simLastPhase = 1;
+    simKashLane = -0.05;
+    simLastObstacleAt = 0;
+    simCrashing = false;
     state.phase = 'RUNNING';
     state.startTime = Date.now();
     state.multiplier = 1.00;
     state.chasePhase = 1;
     roadScene.serverRoundRunning = true;
+    roadScene.riderLane = simKashLane;
     roadScene.clearGameObjects();
     $('sim-log').textContent = 'Running... crash at ' + simCrashPoint.toFixed(1) + '×';
 
     simInterval = setInterval(() => {
+      if (simCrashing) return;
+
       simElapsed += 80 * simSpeed;
       const mult = Math.max(1, Math.exp(0.000055 * simElapsed));
       state.multiplier = mult;
@@ -250,27 +292,90 @@ function wireControls() {
         state.chasePhase = newPhase as ChasePhase;
         const banner = PHASE_BANNERS[newPhase];
         if (banner) $('sim-log').textContent = banner;
-
-        // Auto-set helicopter
         if (newPhase >= 5) {
           state.helicopterActive = true;
           state.heliStartTime = Date.now();
-          ($('toggle-heli') as HTMLInputElement).checked = true;
         }
       }
 
-      // Update multiplier slider to match
       (multSlider as HTMLInputElement).value = String(mult);
       $('mult-val').textContent = mult.toFixed(2) + '×';
 
+      // Spawn obstacles (same logic as server)
+      const now = Date.now();
+      const interval = [1200, 800, 500, 350, 250][state.chasePhase - 1];
+      if (now - simLastObstacleAt >= interval && Math.random() < 0.7) {
+        simLastObstacleAt = now;
+
+        const multiChance = [0.15, 0.25, 0.35, 0.45, 0.5][state.chasePhase - 1];
+        const count = Math.random() < multiChance ? 2 : 1;
+        const usedLanes: number[] = [];
+        for (let i = 0; i < count; i++) {
+          const avail = OBSTACLE_LANES.filter(l => !usedLanes.some(u => Math.abs(u - l) < 0.3));
+          if (avail.length === 0) break;
+          usedLanes.push(avail[Math.floor(Math.random() * avail.length)]);
+        }
+
+        for (const l of usedLanes) {
+          roadScene.obstacles.push({
+            type: OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)] as any,
+            rx: l, rz: 0.02, speed: 0, color: '#EF4444', lanes: 1,
+          });
+        }
+
+        // Kash dodge
+        const inDanger = usedLanes.some(l => Math.abs(simKashLane - l) < 0.4);
+        if (inDanger) {
+          const safeLanes = SIM_KASH_LANES.filter(kl => usedLanes.every(ol => Math.abs(kl - ol) > 0.3));
+          if (safeLanes.length > 0) {
+            const newLane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
+            const delay = state.chasePhase <= 2 ? 150 + Math.random() * 100 : 0;
+            if (delay > 0) {
+              setTimeout(() => { simKashLane = newLane; roadScene.riderLane = newLane; }, delay);
+            } else {
+              simKashLane = newLane;
+              roadScene.riderLane = newLane;
+            }
+          }
+        }
+      }
+
       // Crash
       if (mult >= simCrashPoint) {
-        clearInterval(simInterval!);
-        simInterval = null;
-        state.phase = 'CRASHED';
-        roadScene.serverRoundRunning = false;
-        roadScene.spawnCrashParticles();
-        $('sim-log').textContent = 'CRASHED at ' + mult.toFixed(2) + '×';
+        simCrashing = true;
+
+        if (simCrashPoint <= 1.00) {
+          clearInterval(simInterval!);
+          simInterval = null;
+          state.phase = 'CRASHED';
+          roadScene.serverRoundRunning = false;
+          roadScene.spawnCrashParticles();
+          $('sim-log').textContent = 'ENGINE STALLED';
+          return;
+        }
+
+        // Spawn crash obstacle exactly in Kash's lane
+        const crashLane = simKashLane;
+        const crashType = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
+        roadScene.obstacles.push({
+          type: crashType as any, rx: crashLane, rz: 0, speed: 0, color: '#EF4444', lanes: 1,
+        });
+
+        const delay = [1000, 600, 380, 300, 200][state.chasePhase - 1];
+        setTimeout(() => {
+          clearInterval(simInterval!);
+          simInterval = null;
+          state.phase = 'CRASHED';
+          roadScene.serverRoundRunning = false;
+          // Keep only crash obstacle
+          if (roadScene.obstacles.length > 0) {
+            const last = roadScene.obstacles[roadScene.obstacles.length - 1];
+            roadScene.obstacles.length = 0;
+            roadScene.obstacles.push(last);
+          }
+          roadScene.spawnCrashParticles();
+          $('sim-log').textContent = 'CRASHED at ' + mult.toFixed(2) + '×';
+        }, delay);
       }
     }, 80);
   });
