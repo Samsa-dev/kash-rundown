@@ -1353,6 +1353,8 @@ export class RoadScene {
     });
     this.riderImageSprite = new Sprite(imgTexture);
     this.riderImageSprite.anchor.set(0.5, 1);
+    // Image is much larger than video (1148x1979 vs 390x390) — normalize
+    this.riderImageSprite.scale.set(390 / imgTexture.width);
 
     if (!isSafari) {
       // Load video version for Chrome/Firefox
