@@ -1334,6 +1334,7 @@ export class RoadScene {
     const videoSource = new VideoSource({ resource: video, autoPlay: true });
     this.riderVideoSprite = new Sprite(new Texture({ source: videoSource }));
     this.riderVideoSprite.anchor.set(0.5, 0.5);
+    this.riderVideoSprite.blendMode = 'screen';
 
     // Load image version
     const imgTexture = await Assets.load({
