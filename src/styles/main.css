@@ -27,11 +27,12 @@ body {
 
 #wrap {
   position: relative;
+  width: 100vw;
   height: 100dvh;
-  aspect-ratio: 390 / 844;
+  max-width: calc(100dvh * 390 / 844);
+  max-height: calc(100vw * 844 / 390);
+  margin: 0 auto;
   overflow: hidden;
-  border-radius: 20px;
-  box-shadow: 0 0 80px rgba(234,179,8,0.25), 0 0 160px rgba(234,179,8,0.1);
 }
 
 #pixi-container {
@@ -762,6 +763,3 @@ body {
   to { transform: translateY(0); opacity: 1; }
 }
 
-@media (max-width: 440px) {
-  #wrap { width: 100vw; height: 100dvh; aspect-ratio: auto; border-radius: 0; }
-}

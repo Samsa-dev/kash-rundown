@@ -28,11 +28,14 @@ let btnState: BtnState = 'bet';
 async function init() {
   const introScreen = document.getElementById('intro-screen')!;
   const introVideo = document.getElementById('intro-video') as HTMLVideoElement;
-  const tapHint = document.getElementById('intro-tap-hint')!;
+  const skipBtn = document.getElementById('intro-skip')!;
 
   const loadingBar = document.getElementById('intro-loading-bar')!;
   const loadingText = document.getElementById('intro-loading-text')!;
   const loadingWrap = document.getElementById('intro-loading')!;
+
+  // Auto-reload if loading gets stuck (20s timeout)
+  const loadingTimeout = setTimeout(() => location.reload(), 20000);
 
   // Show loading bar immediately
   loadingBar.style.width = '10%';
@@ -95,18 +98,29 @@ async function init() {
   updateHistory();
   updateStats();
 
-  // ── Start video autoplay (muted, won't block) ──
-  introVideo.play().catch(() => {});
-
-  // ── Loading done — show tap hint ──
+  // ── Loading done — cancel reload timeout, start video ──
+  clearTimeout(loadingTimeout);
   loadingBar.style.width = '100%';
   loadingText.textContent = 'Ready';
-  setTimeout(() => {
-    loadingWrap.classList.remove('visible');
-    tapHint.classList.add('visible');
-  }, 400);
 
-  // ── Click/tap to skip video and start game ──
+  // Try autoplay with audio — if blocked, try muted, then show skip anyway
+  introVideo.play().then(() => {
+    loadingWrap.classList.remove('visible');
+    skipBtn.classList.add('visible');
+  }).catch(() => {
+    // Autoplay with audio blocked — try muted
+    introVideo.muted = true;
+    introVideo.play().then(() => {
+      loadingWrap.classList.remove('visible');
+      skipBtn.classList.add('visible');
+    }).catch(() => {
+      // Can't play at all — skip to game
+      loadingWrap.classList.remove('visible');
+      showGame();
+    });
+  });
+
+  // ── Skip intro button only ──
   let gameShown = false;
   const showGame = () => {
     if (gameShown) return;
@@ -118,8 +132,7 @@ async function init() {
     setTimeout(() => introScreen.remove(), 1000);
   };
 
-  introScreen.addEventListener('click', showGame);
-  introScreen.addEventListener('touchstart', showGame);
+  skipBtn.addEventListener('click', (e) => { e.stopPropagation(); showGame(); });
   // If video ends naturally, also show game
   introVideo.addEventListener('ended', showGame, { once: true });
   // Source errors — don't get stuck
@@ -127,8 +140,6 @@ async function init() {
     console.warn('[Intro] Source failed:', s.src);
     showGame();
   }));
-  // Absolute fallback
-  setTimeout(showGame, 60000);
 }
 
 // ══════════════════════════════════════
