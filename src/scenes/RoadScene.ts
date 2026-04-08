@@ -1300,11 +1300,13 @@ export class RoadScene {
 
   async loadVideoBackground(): Promise<void> {
     const video = document.createElement('video');
-    video.src = '/assets/road-bg.webm';
     video.loop = true;
     video.muted = true;
     video.playsInline = true;
     video.autoplay = true;
+    // WebM for Chrome/Firefox, MP4 fallback for Safari
+    const webm = video.canPlayType('video/webm; codecs="vp9"');
+    video.src = webm ? '/assets/road-bg.webm' : '/assets/road-bg.mp4';
     await video.play();
 
     const { VideoSource } = await import('pixi.js');
@@ -1320,13 +1322,14 @@ export class RoadScene {
   async loadRiderSprite(): Promise<void> {
     const { Assets, VideoSource } = await import('pixi.js');
 
-    // Load video version
+    // Load video version — WebM for Chrome/Firefox, MP4 for Safari
     const video = document.createElement('video');
-    video.src = '/assets/kash-rider.webm';
     video.loop = true;
     video.muted = true;
     video.playsInline = true;
     video.autoplay = true;
+    const webm = video.canPlayType('video/webm; codecs="vp9"');
+    video.src = webm ? '/assets/kash-rider.webm' : '/assets/kash-rider.mp4';
     await video.play();
     const videoSource = new VideoSource({ resource: video, autoPlay: true });
     this.riderVideoSprite = new Sprite(new Texture({ source: videoSource }));
