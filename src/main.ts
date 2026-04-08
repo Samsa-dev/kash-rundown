@@ -2,7 +2,9 @@ import { Application } from 'pixi.js';
 import { GameEngine } from './game/GameEngine';
 import { RoadScene } from './scenes/RoadScene';
 import { DialogueSystem } from './kash/DialogueSystem';
-import { W, H, roadToScreen } from './scenes/constants';
+import { GameClient } from './network/GameClient';
+import { W, H } from './scenes/constants';
+import { getChasePhase, PHASE_BANNERS } from './game/Phases';
 import * as Audio from './audio/AudioManager';
 import './styles/main.css';
 
@@ -10,332 +12,451 @@ import './styles/main.css';
 const engine = new GameEngine();
 const roadScene = new RoadScene();
 const dialogue = new DialogueSystem();
+const client = new GameClient('ws://localhost:3001');
 
+// ── State ──
+let autoCashOut = false;
+let autoCashOutTarget = 2;
+let pendingBet: number | null = null;
+let serverRunning = false;   // is the server round currently running?
+let playerInRound = false;   // did the player bet this round?
+
+// ── Button state ──
+type BtnState = 'bet' | 'cashout' | 'placed' | 'queued';
+let btnState: BtnState = 'bet';
+
+// ── Init ──
 async function init() {
+  const loadBar = document.getElementById('loading-bar')!;
+  const loadText = document.getElementById('loading-text')!;
+
+  loadBar.style.width = '20%';
+  loadText.textContent = 'Initializing engine...';
+
   const app = new Application();
-  await app.init({
-    width: W,
-    height: H,
-    backgroundAlpha: 0,
-    antialias: true,
-    resolution: window.devicePixelRatio || 1,
-    autoDensity: true,
-  });
+  await app.init({ width: W, height: H, backgroundAlpha: 0, antialias: true, resolution: window.devicePixelRatio || 1, autoDensity: true });
 
-  const container = document.getElementById('pixi-container')!;
-  container.appendChild(app.canvas);
+  loadBar.style.width = '40%';
+  loadText.textContent = 'Loading assets...';
+
+  document.getElementById('pixi-container')!.appendChild(app.canvas);
   app.stage.addChild(roadScene.container);
+  await roadScene.loadRiderSprite();
 
-  // ── Game loop ──
-  app.ticker.add(() => {
-    roadScene.update(engine.state);
-  });
+  loadBar.style.width = '70%';
+  loadText.textContent = 'Connecting to server...';
+  await client.connect();
+  wireServerEvents();
 
-  // ── Nitro click on Pixi canvas ──
-  app.canvas.addEventListener('click', (e: MouseEvent) => {
-    if (engine.state.phase !== 'RUNNING') return;
-    const rect = app.canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) * (W / rect.width);
-    const my = (e.clientY - rect.top) * (H / rect.height);
+  loadBar.style.width = '90%';
+  loadText.textContent = 'Setting up...';
 
-    const hit = roadScene.checkNitroHit(mx, my);
-    if (hit) {
-      hit.collected = true;
-      const bonus = engine.collectNitroBonus();
-      const { x, y } = roadToScreen(hit.rx, hit.rz);
-      showFloatingText(`⚡ NITRO +${bonus.toFixed(1)}×`, '#EA580C', x, y - 20);
-      Audio.playNitro();
-      flashScreen('#EA580C', 300);
-      showKashQuote(dialogue.getRundownLine('nitro'));
-    }
-  });
+  app.ticker.add(() => roadScene.update(engine.state));
 
-  // ── Engine events ──
-  engine.on((event) => {
-    switch (event.type) {
-      case 'MULTIPLIER_UPDATE':
-        updateMultiplierUI(event.multiplier, event.profit);
-        Audio.updateEngine(event.multiplier);
-        break;
-      case 'PHASE_CHANGE':
-        onPhaseChange(event.phase);
-        break;
-      case 'BANNER':
-        showBanner(event.text);
-        break;
-      case 'GHOST_MODE':
-        flashScreen('#7B2FBE', 1200);
-        $('ghost-badge').style.display = 'block';
-        showKashQuote(dialogue.getRundownLine('ghost_mode'));
-        break;
-      case 'ROADBLOCK':
-        showRoadblockOverlay();
-        Audio.playRoadblock();
-        break;
-      case 'HELICOPTER_ACTIVATED':
-        $('heli-warning').classList.add('visible');
-        break;
-      case 'CRASH':
-        onCrash();
-        break;
-      case 'CASH_OUT':
-        onCashOut(event.amount);
-        break;
-    }
-  });
-
-  // ── Wire up DOM buttons ──
-  $('place-bet-btn').addEventListener('click', placeBet);
-  $('cashout-btn').addEventListener('click', () => engine.doCashOut());
-  $('rb-cashout').addEventListener('click', () => engine.doCashOut());
-  $('dodge-left').addEventListener('click', () => onDodge('LEFT'));
-  $('dodge-right').addEventListener('click', () => onDodge('RIGHT'));
-  $('run-again').addEventListener('click', resetToIdle);
-  $('bet-half').addEventListener('click', () => adjustBet(0.5));
-  $('bet-double').addEventListener('click', () => adjustBet(2));
-  $('auto-toggle').addEventListener('click', toggleAuto);
-  $('auto-target').addEventListener('input', (e) => {
-    engine.state.autoCashOutTarget = parseFloat((e.target as HTMLInputElement).value) || 2;
-  });
-  $('bet-input').addEventListener('input', updateBetDisplay);
-
-  // Quick bets
+  // ── Wire DOM ──
+  $('place-bet-btn').addEventListener('click', onMainButtonClick);
+  $('run-again').addEventListener('click', () => resetUI());
+  $('bet-half').addEventListener('click', () => adjustBetFactor(0.5));
+  $('bet-minus').addEventListener('click', () => addToBet(-1));
+  $('bet-plus').addEventListener('click', () => addToBet(1));
+  $('bet-double').addEventListener('click', () => adjustBetFactor(2));
+  $('auto-slider').addEventListener('input', onAutoSlider);
   document.querySelectorAll('.qbet').forEach(btn => {
     btn.addEventListener('click', () => {
-      const amount = btn.getAttribute('data-amount');
-      if (amount === 'max') setBetMax();
-      else setBet(parseFloat(amount!));
+      const a = btn.getAttribute('data-amount');
+      if (a === 'max') setBetMax();
+      else if (a === 'min') setBet(1);
+      else addToBet(parseFloat(a!));
     });
   });
 
-  // Init UI
+  // Audio needs user gesture
+  const initAudioOnce = () => { Audio.initAudio(); document.removeEventListener('click', initAudioOnce); document.removeEventListener('touchstart', initAudioOnce); };
+  document.addEventListener('click', initAudioOnce);
+  document.addEventListener('touchstart', initAudioOnce);
+
+  $('mute-btn').addEventListener('click', () => {
+    const m = Audio.toggleMute();
+    $('mute-btn').textContent = m ? '🔇' : '🔊';
+    $('mute-btn').classList.toggle('muted', m);
+  });
+
   updateBalanceDisplay();
   updateHistory();
   updateStats();
-  updateBetDisplay();
+
+  // Show game
+  loadBar.style.width = '100%';
+  loadText.textContent = 'Ready';
+  document.getElementById('wrap')!.style.visibility = 'visible';
+  setTimeout(() => document.getElementById('loading-screen')!.classList.add('hidden'), 300);
 }
 
-// ── DOM helpers ──
-function $(id: string): HTMLElement {
-  return document.getElementById(id)!;
+// ══════════════════════════════════════
+//  SERVER EVENTS
+// ══════════════════════════════════════
+
+function wireServerEvents() {
+
+  client.on('welcome', (msg) => {
+    engine.state.balance = msg.balance as number;
+    updateBalanceDisplay();
+  });
+
+  client.on('history', (msg) => {
+    const entries = msg.entries as { roundId: number; crashPoint: number }[];
+    for (const e of entries) engine.state.history.push({ mult: e.crashPoint, result: 'LOST', bet: 0 });
+    if (engine.state.history.length > 20) engine.state.history.length = 20;
+    updateHistory();
+  });
+
+  // ── New round about to start ──
+  client.on('round:waiting', (_msg) => {
+    // Nothing visual here, countdown follows immediately
+  });
+
+  // ── Countdown: bets are open ──
+  client.on('round:countdown', (msg) => {
+    serverRunning = false;
+    roadScene.serverRoundRunning = false;
+    setRoundStatus('waiting');
+
+    // Reset UI if coming from crash/cashout
+    if (engine.state.phase !== 'IDLE') resetUI();
+
+    // Send queued bet
+    if (pendingBet !== null) {
+      client.placeBet(pendingBet);
+      pendingBet = null;
+    }
+
+    // Ensure button is in bet mode and controls enabled
+    setMainButton('bet');
+    setBetControlsEnabled(true);
+
+    startCountdown(msg.seconds as number);
+  });
+
+  // ── Server accepted our bet ──
+  client.on('bet:confirmed', (msg) => {
+    engine.state.balance = msg.balance as number;
+    engine.state.bet = msg.amount as number;
+    engine.state.phase = 'COUNTDOWN';
+    playerInRound = true;
+    updateBalanceDisplay();
+    roadScene.clearGameObjects();
+    Audio.initAudio();
+    setMainButton('placed', msg.amount as number);
+    setBetControlsEnabled(false);
+  });
+
+  client.on('bet:cancelled', (msg) => {
+    engine.state.balance = msg.balance as number;
+    engine.state.phase = 'IDLE';
+    playerInRound = false;
+    updateBalanceDisplay();
+    setMainButton('bet');
+    setBetControlsEnabled(true);
+  });
+
+  client.on('bet:rejected', (msg) => {
+    showFloatingText(msg.reason as string, '#EF4444', W / 2, 500);
+  });
+
+  // ── Multiplier tick (round is running) ──
+  client.on('round:tick', (msg) => {
+    const mult = msg.multiplier as number;
+    engine.state.multiplier = mult;
+
+    // Phase banners
+    const newPhase = getChasePhase(mult);
+    if (newPhase !== engine.state.chasePhase) {
+      engine.state.chasePhase = newPhase;
+      const banner = PHASE_BANNERS[newPhase];
+      if (banner) showBanner(banner);
+    }
+
+    // First tick of a new round
+    if (!serverRunning) {
+      serverRunning = true;
+      roadScene.serverRoundRunning = true;
+      setRoundStatus('in-play');
+      Audio.initAudio();
+      Audio.startEngine();
+
+      // Disable bet controls, switch button
+      setBetControlsEnabled(false);
+      if (playerInRound) {
+        engine.state.phase = 'RUNNING';
+        setMainButton('cashout', engine.state.bet * mult);
+        $('profit-display').classList.add('visible');
+        showKashQuote(dialogue.getRundownLine('round_start'));
+      } else {
+        // Spectating — button stays as bet but disabled, or they can queue
+        setMainButton('bet');
+      }
+    }
+
+    // Update multiplier display always
+    const mEl = $('multiplier-display');
+    mEl.textContent = mult.toFixed(2) + '×';
+    mEl.className = '';
+    if (engine.state.chasePhase >= 4) mEl.classList.add('phase4');
+    else if (engine.state.chasePhase >= 3) mEl.classList.add('phase3');
+    Audio.updateEngine(mult);
+
+    // Update cashout button with current value
+    if (playerInRound && engine.state.phase === 'RUNNING') {
+      const profit = engine.state.bet * mult - engine.state.bet;
+      $('profit-display').textContent = '▲ +$' + profit.toFixed(2);
+      setMainButton('cashout', engine.state.bet * mult);
+
+      if (autoCashOut && mult >= autoCashOutTarget) doCashOut();
+    }
+  });
+
+  // ── Cashout confirmed ──
+  client.on('cashOut:confirmed', (msg) => {
+    const amount = msg.amount as number;
+    const mult = msg.multiplier as number;
+    engine.state.phase = 'CASHED_OUT';
+    engine.state.balance = msg.balance as number;
+    playerInRound = false;
+
+    engine.state.sessionProfit += amount - engine.state.bet;
+    engine.state.sessionRounds++;
+    if (!engine.state.bestRun || mult > engine.state.bestRun) engine.state.bestRun = mult;
+    engine.state.history.unshift({ mult, result: 'WON', bet: engine.state.bet });
+    if (engine.state.history.length > 20) engine.state.history.pop();
+
+    Audio.stopEngine();
+    Audio.playCashOut();
+    flashScreen('#16A34A', 500);
+    showFloatingText('CASHED OUT! +$' + amount.toFixed(2), '#16A34A', W / 2, 350);
+
+    // Switch button back — can queue for next round
+    setMainButton('bet');
+    setBetControlsEnabled(true);
+
+    $('win-screen').classList.add('visible');
+    $('win-amount').textContent = '$' + amount.toFixed(2);
+    $('win-mult-val').textContent = mult.toFixed(2) + '×';
+    updateBalanceDisplay();
+    updateHistory();
+    updateStats();
+
+    setTimeout(() => $('win-screen').classList.remove('visible'), 2200);
+  });
+
+  // ── Round crashed ──
+  client.on('round:crash', (msg) => {
+    const crashPoint = msg.crashPoint as number;
+    serverRunning = false;
+    roadScene.serverRoundRunning = false;
+
+    // Crash effects always (spectating or playing)
+    setRoundStatus('crash');
+    Audio.stopEngine();
+    roadScene.spawnCrashParticles();
+    roadScene.clearGameObjects();
+    Audio.playCrash();
+    flashScreen('#EF4444', 600);
+
+    // If player was betting and didn't cash out
+    if (playerInRound && engine.state.phase === 'RUNNING') {
+      engine.state.crashPoint = crashPoint;
+      engine.state.phase = 'CRASHED';
+      playerInRound = false;
+
+      engine.state.sessionProfit -= engine.state.bet;
+      engine.state.sessionRounds++;
+      engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: engine.state.bet });
+      if (engine.state.history.length > 20) engine.state.history.pop();
+
+      setTimeout(() => {
+        $('bust-screen').classList.add('visible');
+        $('bust-mult').textContent = crashPoint.toFixed(2) + '×';
+        $('bust-crash-val').textContent = crashPoint.toFixed(2) + '×';
+        $('bust-bet-val').textContent = '$' + engine.state.bet.toFixed(2);
+        $('bust-result-val').textContent = '-$' + engine.state.bet.toFixed(2);
+        $('bust-quote').textContent = '"' + dialogue.getBustQuote() + '"';
+        updateBalanceDisplay();
+        updateHistory();
+        updateStats();
+      }, 800);
+    }
+
+    // Re-enable controls for next round
+    setMainButton('bet');
+    setBetControlsEnabled(true);
+  });
+
+  // ── Obstacles & Kash movement from server ──
+  client.on('obstacle:spawn', (msg) => {
+    roadScene.obstacles.push({
+      type: msg.obstacleType as any,
+      rx: msg.lane as number,
+      rz: 0.02, speed: 0, color: '#EF4444',
+      lanes: msg.lanes as number,
+    });
+  });
+
+  client.on('kash:move', (msg) => {
+    roadScene.riderLane = msg.lane as number;
+  });
+
+  client.on('players', () => {});
+}
+
+// ══════════════════════════════════════
+//  BUTTON LOGIC
+// ══════════════════════════════════════
+
+function onMainButtonClick(): void {
+  switch (btnState) {
+    case 'bet': placeBet(); break;
+    case 'placed':
+      // Cancel bet during countdown
+      client.cancelBet();
+      break;
+    case 'cashout': doCashOut(); break;
+    case 'queued':
+      pendingBet = null;
+      setMainButton('bet');
+      setBetControlsEnabled(true);
+      break;
+  }
 }
 
 function placeBet(): void {
-  const betInput = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
-  if (!engine.placeBet(betInput)) {
-    if (betInput > engine.state.balance) showFloatingText('Insufficient balance', '#EF4444', W / 2, 500);
-    else showFloatingText('Minimum bet: $0.10', '#EF4444', W / 2, 500);
-    return;
+  const amount = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
+  if (amount > engine.state.balance) { showFloatingText('Insufficient balance', '#EF4444', W / 2, 500); return; }
+  if (amount < 1) { showFloatingText('Minimum bet: $1.00', '#EF4444', W / 2, 500); return; }
+
+  if (serverRunning) {
+    // Round in progress — queue for next
+    pendingBet = amount;
+    setMainButton('queued', amount);
+    setBetControlsEnabled(false);
+  } else {
+    // Send directly
+    client.placeBet(amount);
   }
-
-  $('bet-area').style.display = 'none';
-  $('bust-screen').classList.remove('visible');
-  ($('place-bet-btn') as HTMLButtonElement).disabled = true;
-  updatePhaseBar(1);
-  roadScene.clearGameObjects();
-
-  Audio.initAudio();
-  startCountdown();
 }
 
-function startCountdown(): void {
+function doCashOut(): void {
+  if (engine.state.phase !== 'RUNNING') return;
+  client.cashOut();
+}
+
+function setMainButton(state: BtnState, amount?: number): void {
+  const btn = $('place-bet-btn');
+  btnState = state;
+  btn.classList.remove('queued', 'cashout-mode', 'placed-mode');
+  btn.style.opacity = '';
+  btn.style.pointerEvents = '';
+
+  switch (state) {
+    case 'bet':
+      if (serverRunning) {
+        btn.classList.add('queued');
+        const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
+        btn.innerHTML = 'BET NEXT ROUND — $<span id="btn-bet-amount">' + val.toFixed(2) + '</span>';
+      } else {
+        const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
+        btn.innerHTML = 'PLACE BET — $<span id="btn-bet-amount">' + val.toFixed(2) + '</span>';
+      }
+      break;
+    case 'placed':
+      btn.classList.add('placed-mode');
+      btn.innerHTML = 'BET PLACED<span style="font-size:13px;font-weight:400;letter-spacing:1px;opacity:0.9;display:block">$' + (amount ?? 0).toFixed(2) + ' — tap to cancel</span>';
+      break;
+    case 'cashout':
+      btn.classList.add('cashout-mode');
+      btn.innerHTML = 'CASH OUT<span style="font-size:13px;font-weight:400;letter-spacing:1px;opacity:0.9;display:block">$' + (amount ?? 0).toFixed(2) + '</span>';
+      break;
+    case 'queued':
+      btn.classList.add('queued');
+      btn.innerHTML = 'QUEUED<span style="font-size:13px;font-weight:400;letter-spacing:1px;opacity:0.9;display:block">$' + (amount ?? 0).toFixed(2) + ' — tap to cancel</span>';
+      break;
+  }
+}
+
+function setBetControlsEnabled(enabled: boolean): void {
+  const els: HTMLElement[] = [$('bet-half'), $('bet-minus'), $('bet-plus'), $('bet-double'), $('bet-input'), $('auto-slider')];
+  document.querySelectorAll('.qbet').forEach(el => els.push(el as HTMLElement));
+  for (const el of els) {
+    el.style.opacity = enabled ? '' : '0.3';
+    el.style.pointerEvents = enabled ? '' : 'none';
+  }
+}
+
+// ══════════════════════════════════════
+//  UI HELPERS
+// ══════════════════════════════════════
+
+function $(id: string): HTMLElement { return document.getElementById(id)!; }
+
+function resetUI(): void {
+  engine.state.phase = 'IDLE';
+  engine.state.multiplier = 1.00;
+  engine.state.chasePhase = 1;
+  engine.state.helicopterActive = false;
+  playerInRound = false;
+  roadScene.riderLane = 0;
+
+  $('bust-screen').classList.remove('visible');
+  $('win-screen').classList.remove('visible');
+  $('profit-display').classList.remove('visible');
+  $('multiplier-display').textContent = '1.00×';
+  $('multiplier-display').className = '';
+  $('kash-quote').classList.remove('visible');
+
+  setMainButton('bet');
+  setBetControlsEnabled(true);
+  updateBalanceDisplay();
+  updateHistory();
+  updateStats();
+}
+
+let countdownInterval: ReturnType<typeof setInterval> | null = null;
+function startCountdown(seconds = 5): void {
+  if (countdownInterval) clearInterval(countdownInterval);
   const overlay = $('countdown-overlay');
   const numEl = $('countdown-num');
   overlay.classList.add('visible');
-  let n = 5;
+  let n = seconds;
   numEl.textContent = String(n);
   Audio.playCountdownTick(n);
 
-  const interval = setInterval(() => {
+  countdownInterval = setInterval(() => {
     n--;
     numEl.style.animation = 'none';
     void numEl.offsetHeight;
     numEl.style.animation = 'count-pop 0.4s ease-out';
     numEl.textContent = n > 0 ? String(n) : 'GO!';
     Audio.playCountdownTick(n);
-
     if (n <= 0) {
-      clearInterval(interval);
-      setTimeout(() => {
-        overlay.classList.remove('visible');
-        startRound();
-      }, 400);
+      clearInterval(countdownInterval!);
+      countdownInterval = null;
+      setTimeout(() => overlay.classList.remove('visible'), 400);
     }
   }, 1000);
 }
 
-function startRound(): void {
-  engine.startRound();
-  $('cashout-area').style.display = 'block';
-  $('profit-display').classList.add('visible');
-  Audio.startEngine();
-  showKashQuote(dialogue.getRundownLine('round_start'));
-}
-
-function onPhaseChange(phase: number): void {
-  updatePhaseBar(phase);
-  if (phase === 5) {
-    $('ghost-badge').style.display = 'block';
-  }
-}
-
-function onCrash(): void {
-  Audio.stopEngine();
-  roadScene.spawnCrashParticles();
-  Audio.playCrash();
-  flashScreen('#EF4444', 600);
-
-  $('cashout-area').style.display = 'none';
-  $('heli-warning').classList.remove('visible');
-  $('ghost-badge').style.display = 'none';
-  $('roadblock-overlay').classList.remove('visible');
-
-  setTimeout(() => {
-    $('bust-screen').classList.add('visible');
-    $('bust-mult').textContent = engine.state.crashPoint!.toFixed(2) + '×';
-    $('bust-crash-val').textContent = engine.state.crashPoint!.toFixed(2) + '×';
-    $('bust-bet-val').textContent = '$' + engine.state.bet.toFixed(2);
-    $('bust-result-val').textContent = '-$' + engine.state.bet.toFixed(2);
-    $('bust-quote').textContent = '"' + dialogue.getBustQuote() + '"';
-    updateBalanceDisplay();
-    updateHistory();
-    updateStats();
-  }, 800);
-}
-
-function onCashOut(amount: number): void {
-  Audio.stopEngine();
-  Audio.playCashOut();
-  flashScreen('#16A34A', 500);
-  showFloatingText('CASHED OUT! +$' + amount.toFixed(2), '#16A34A', W / 2, 350);
-
-  $('cashout-area').style.display = 'none';
-  $('heli-warning').classList.remove('visible');
-  $('ghost-badge').style.display = 'none';
-  $('roadblock-overlay').classList.remove('visible');
-
-  const ws = $('win-screen');
-  ws.classList.add('visible');
-  $('win-amount').textContent = '$' + amount.toFixed(2);
-  $('win-mult-val').textContent = engine.state.multiplier.toFixed(2) + '×';
-  updateBalanceDisplay();
-  updateHistory();
-  updateStats();
-
-  setTimeout(() => {
-    ws.classList.remove('visible');
-    resetToIdle();
-  }, 2200);
-}
-
-function onDodge(direction: 'LEFT' | 'RIGHT'): void {
-  if (!engine.state.roadblockActive) return;
-  clearRoadblockTimer();
-  $('roadblock-overlay').classList.remove('visible');
-
-  const success = engine.dodge(direction);
-  if (success) {
-    showFloatingText('+1.5× DODGE BONUS!', '#16A34A', W / 2, 400);
-    Audio.playDodgeSuccess();
-    flashScreen('#16A34A', 400);
-  } else {
-    showFloatingText('WRONG WAY! Penalty pause', '#EF4444', W / 2, 400);
-  }
-}
-
-let roadblockInterval: ReturnType<typeof setInterval> | null = null;
-
-function showRoadblockOverlay(): void {
-  $('roadblock-overlay').classList.add('visible');
-  $('rb-cashout-val').textContent = (engine.state.bet * engine.state.multiplier).toFixed(2);
-
-  const timerBar = $('rb-timer-bar');
-  const timerSec = $('rb-timer-sec');
-  const start = Date.now();
-
-  roadblockInterval = setInterval(() => {
-    if (!engine.state.roadblockActive) { clearRoadblockTimer(); return; }
-    const elapsed = Date.now() - start;
-    const remaining = Math.max(0, 2000 - elapsed);
-    timerBar.style.width = ((remaining / 2000) * 100) + '%';
-    timerSec.textContent = (remaining / 1000).toFixed(1) + 's';
-    if (remaining <= 0) {
-      clearRoadblockTimer();
-      if (engine.state.roadblockActive) {
-        $('roadblock-overlay').classList.remove('visible');
-        engine.state.roadblockActive = false;
-        showFloatingText('TOO SLOW!', '#EF4444', W / 2, 400);
-        // Force crash via state
-        engine.state.crashPoint = engine.state.multiplier;
-      }
-    }
-  }, 50);
-}
-
-function clearRoadblockTimer(): void {
-  if (roadblockInterval) { clearInterval(roadblockInterval); roadblockInterval = null; }
-}
-
-function resetToIdle(): void {
-  engine.resetToIdle();
-  clearRoadblockTimer();
-
-  $('bust-screen').classList.remove('visible');
-  $('win-screen').classList.remove('visible');
-  $('bet-area').style.display = 'flex';
-  $('cashout-area').style.display = 'none';
-  $('profit-display').classList.remove('visible');
-  $('ghost-badge').style.display = 'none';
-  $('heli-warning').classList.remove('visible');
-  ($('place-bet-btn') as HTMLButtonElement).disabled = false;
-  $('multiplier-display').textContent = '1.00×';
-  $('multiplier-display').className = '';
-  $('roadblock-overlay').classList.remove('visible');
-  $('kash-quote').classList.remove('visible');
-  updatePhaseBar(1);
-  updateBalanceDisplay();
-  updateHistory();
-  updateStats();
-}
-
-// ── UI updates ──
-
-function updateMultiplierUI(m: number, profit: number): void {
-  const mEl = $('multiplier-display');
-  mEl.textContent = m.toFixed(2) + '×';
-  mEl.className = '';
-  if (engine.state.chasePhase >= 5) mEl.classList.add('phase5');
-  else if (engine.state.chasePhase === 4) mEl.classList.add('phase4');
-  else if (engine.state.chasePhase === 3) mEl.classList.add('phase3');
-
-  $('profit-display').textContent = '▲ +$' + profit.toFixed(2);
-
-  const cashoutBtn = $('cashout-btn');
-  const cashoutAmt = engine.state.bet * m;
-  $('cashout-amount').textContent = '$' + cashoutAmt.toFixed(2);
-  cashoutBtn.className = '';
-  if (engine.state.chasePhase === 3) cashoutBtn.classList.add('phase3');
-  else if (engine.state.chasePhase === 4) cashoutBtn.classList.add('phase4');
-  else if (engine.state.chasePhase === 5) cashoutBtn.classList.add('phase5');
-
-  $('rb-cashout-val').textContent = cashoutAmt.toFixed(2);
+function setRoundStatus(status: '' | 'in-play' | 'waiting' | 'crash'): void {
+  const el = $('round-status');
+  el.className = '';
+  if (status === 'in-play') { el.className = 'in-play'; el.textContent = 'IN PLAY'; }
+  else if (status === 'waiting') { el.className = 'waiting'; el.textContent = 'BET NOW'; }
+  else if (status === 'crash') { el.className = 'crashed'; el.textContent = 'CRASHED!'; }
 }
 
 function updateBalanceDisplay(): void {
   $('bal-num').textContent = engine.state.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function updatePhaseBar(phase: number): void {
-  const ids = ['pl1', 'pl2', 'pl3', 'pl4', 'pl5'];
-  ids.forEach((id, i) => {
-    const el = $(id);
-    el.className = 'phase-label';
-    if (i + 1 < phase) el.classList.add('done');
-    else if (i + 1 === phase) {
-      el.classList.add(phase === 5 ? 'ghost-active' : 'active');
-    }
-  });
-}
+function updatePhaseBar(_phase: number): void {}
 
 function updateHistory(): void {
   const strip = $('history-strip');
@@ -360,46 +481,56 @@ function updateStats(): void {
 }
 
 function updateBetDisplay(): void {
-  const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
-  $('btn-bet-amount').textContent = val.toFixed(2);
+  if (btnState === 'bet') {
+    const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
+    const el = document.getElementById('btn-bet-amount');
+    if (el) el.textContent = val.toFixed(2);
+  }
 }
 
 function setBet(amount: number): void {
-  const clamped = Math.min(amount, engine.state.balance);
-  ($('bet-input') as HTMLInputElement).value = clamped.toFixed(2);
+  ($('bet-input') as HTMLInputElement).value = Math.min(amount, engine.state.balance).toFixed(2);
   updateBetDisplay();
 }
 
-function setBetMax(): void {
-  setBet(Math.min(engine.state.balance, 500));
-}
+function setBetMax(): void { setBet(Math.min(engine.state.balance, 500)); }
 
-function adjustBet(factor: number): void {
-  const current = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
-  const newVal = Math.max(0.10, Math.min(500, current * factor));
-  ($('bet-input') as HTMLInputElement).value = newVal.toFixed(2);
+function adjustBetFactor(factor: number): void {
+  const cur = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
+  ($('bet-input') as HTMLInputElement).value = Math.max(1, Math.min(500, Math.min(engine.state.balance, cur * factor))).toFixed(2);
   updateBetDisplay();
 }
 
-let autoOn = false;
-function toggleAuto(): void {
-  autoOn = !autoOn;
-  engine.state.autoCashOut = autoOn;
-  $('auto-toggle').classList.toggle('on', autoOn);
-  $('auto-target').classList.toggle('visible', autoOn);
-  $('auto-target-label').classList.toggle('visible', autoOn);
-  if (autoOn) engine.state.autoCashOutTarget = parseFloat(($('auto-target') as HTMLInputElement).value) || 2;
+function addToBet(amount: number): void {
+  const cur = parseFloat(($('bet-input') as HTMLInputElement).value) || 0;
+  ($('bet-input') as HTMLInputElement).value = Math.max(1, Math.min(500, Math.min(engine.state.balance, cur + amount))).toFixed(2);
+  updateBetDisplay();
+}
+
+function sliderToMultiplier(v: number): number {
+  return v === 0 ? 0 : 1.1 * Math.pow(50 / 1.1, v / 100);
+}
+
+function onAutoSlider(): void {
+  const v = parseInt(($('auto-slider') as HTMLInputElement).value);
+  const mult = sliderToMultiplier(v);
+  if (mult === 0) {
+    autoCashOut = false;
+    $('auto-target-val').textContent = 'OFF';
+    $('auto-target-val').style.color = 'var(--muted)';
+  } else {
+    autoCashOut = true;
+    autoCashOutTarget = mult;
+    $('auto-target-val').textContent = mult.toFixed(2) + '×';
+    $('auto-target-val').style.color = 'var(--chase-orange)';
+  }
 }
 
 function showFloatingText(text: string, color: string, x: number, y: number): void {
   const el = document.createElement('div');
   el.className = 'float-text';
   el.textContent = text;
-  el.style.color = color;
-  el.style.left = (x - 100) + 'px';
-  el.style.top = y + 'px';
-  el.style.width = '200px';
-  el.style.textAlign = 'center';
+  el.style.cssText = `color:${color};left:${x - 100}px;top:${y}px;width:200px;text-align:center`;
   $('wrap').appendChild(el);
   el.addEventListener('animationend', () => el.remove());
 }

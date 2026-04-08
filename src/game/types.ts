@@ -9,12 +9,12 @@ export interface HistoryEntry {
 }
 
 export interface Obstacle {
-  type: 'car' | 'police' | 'civilian' | 'cyclist' | 'barricade' | 'spikes' | 'dumpster' | 'cones' | 'flipped_car' | 'electric_puddle';
+  type: 'police' | 'barricade' | 'spikes' | 'dumpster' | 'cones' | 'flipped_car' | 'electric_puddle';
   rx: number;
   rz: number;
   speed: number;
   color: string;
-  dodged: boolean;
+  lanes: number;
 }
 
 export interface NitroItem {
@@ -45,21 +45,12 @@ export interface GameState {
   autoCashOutTarget: number;
   countdownSec: number;
   chasePhase: ChasePhase;
-  roadblockActive: boolean;
-  roadblockAnswer: 'LEFT' | 'RIGHT';
-  roadblockTimer: ReturnType<typeof setInterval> | null;
-  roadblockStart: number | null;
-  multiplierPaused: boolean;
   helicopterActive: boolean;
   heliStartTime: number | null;
-  ghostMode: boolean;
   history: HistoryEntry[];
   sessionProfit: number;
   sessionRounds: number;
   bestRun: number | null;
-  roadblockFired: { r3: boolean; r10: boolean; r50: boolean };
-  heliActivated: boolean;
-  quoteTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export function createInitialState(): GameState {
@@ -74,20 +65,11 @@ export function createInitialState(): GameState {
     autoCashOutTarget: 2,
     countdownSec: 5,
     chasePhase: 1,
-    roadblockActive: false,
-    roadblockAnswer: 'LEFT',
-    roadblockTimer: null,
-    roadblockStart: null,
-    multiplierPaused: false,
     helicopterActive: false,
     heliStartTime: null,
-    ghostMode: false,
     history: [],
     sessionProfit: 0,
     sessionRounds: 0,
     bestRun: null,
-    roadblockFired: { r3: false, r10: false, r50: false },
-    heliActivated: false,
-    quoteTimer: null,
   };
 }

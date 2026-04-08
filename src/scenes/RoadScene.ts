@@ -55,6 +55,14 @@ const FACADES: FacadeBuilding[] = [
   { height: 310, floors: 10, windowCols: 5, hasNeon: false, neonIdx: 7, hasFireEscape: true,  hasAC: true,  baseColor: '#0c0320' },
 ];
 
+const FOG_COLORS: Record<number, string> = {
+  1: '#1a0835',
+  2: '#1e0a3a',
+  3: '#160630',
+  4: '#220c40',
+  5: '#1c0845',
+};
+
 interface RainDrop { x: number; y: number; speed: number; len: number; }
 
 export class RoadScene {
@@ -66,6 +74,7 @@ export class RoadScene {
   private pursuerGfx: Graphics;
   private riderContainer: Container;
   private riderGfx: Graphics;
+  private riderSprite: Sprite | null = null;
   private heliGfx: Graphics;
   private rainGfx: Graphics;
   private sparkGfx: Graphics;
@@ -79,6 +88,8 @@ export class RoadScene {
   private glowFilter: GlowFilter;
   private colorMatrix: ColorMatrixFilter;
   private currentPhase = 0;
+  public skylineFog = true;
+  public roadFog = true;
 
   private rainDrops: RainDrop[] = [];
   public obstacles: Obstacle[] = [];
@@ -91,6 +102,17 @@ export class RoadScene {
   private starPositions: { x: number; y: number; size: number; brightness: number }[] = [];
   private lightningTimer = 0;
   private lightningAlpha = 0;
+  private laneDashOffset = 0;
+  private lampOffset = 0;
+  public riderLane = 0;
+  public riderDepth = 0.6;
+  public serverRoundRunning = false;
+  public speedLineHeight = 5.5;
+  public speedLineInner = 100;
+  public speedLineOuter = 200;
+  private riderLaneActual = 0;
+  private riderDepthActual = 0.6;
+  private riderLaneSpeed = 0.06;
 
   constructor() {
     this.bgCanvas = document.createElement('canvas');
@@ -111,6 +133,9 @@ export class RoadScene {
     this.effectsFront = new Graphics();
 
     this.riderContainer.addChild(this.riderGfx);
+
+    // Kash sprite — loaded async via loadRiderSprite()
+
     this.effectsBack.blendMode = 'add';
     this.heliGfx.blendMode = 'screen';
 
@@ -156,14 +181,14 @@ export class RoadScene {
     this.drawBackground(phase, state);
     this.bgTexture.source.update();
     this.updateFilters(phase);
-    // this.drawEffectsBack(phase);
+    this.drawEffectsBack(phase);
     this.drawObstaclesPixi(state);
-    this.drawPursuersPixi(phase, state);
-    // this.drawRiderPixi(phase, state);
+    // this.drawPursuersPixi(phase, state);
+    this.updateRiderSprite(state);
     this.drawHelicopterPixi(phase, state);
-    // this.drawRainPixi(phase, state);
+    this.drawRainPixi(phase, state);
     this.drawSparksPixi(state, phase);
-    // this.drawEffectsFront(phase, state);
+    this.drawEffectsFront(phase, state);
   }
 
   // ═══════════════════════════════════════════════════════
@@ -192,10 +217,12 @@ export class RoadScene {
         break;
     }
 
-    if (phase === 5) { this.glowFilter.color = 0x7B2FBE; this.glowFilter.distance = 25; this.glowFilter.outerStrength = 5; }
+    // Colored glow border on Kash per phase
+    if (phase >= 5) { this.glowFilter.color = 0xEF4444; this.glowFilter.distance = 20; this.glowFilter.outerStrength = 4; }
     else if (phase >= 4) { this.glowFilter.color = 0xEA580C; this.glowFilter.distance = 15; this.glowFilter.outerStrength = 3; }
-    else if (phase >= 3) { this.glowFilter.color = 0x2563EB; this.glowFilter.distance = 10; this.glowFilter.outerStrength = 1.5; }
-    else { this.glowFilter.distance = 1; this.glowFilter.outerStrength = 0; }
+    else if (phase >= 3) { this.glowFilter.color = 0xEAB308; this.glowFilter.distance = 10; this.glowFilter.outerStrength = 2; }
+    else if (phase >= 2) { this.glowFilter.color = 0x16A34A; this.glowFilter.distance = 6; this.glowFilter.outerStrength = 1; }
+    else { this.glowFilter.distance = 0; this.glowFilter.outerStrength = 0; }
   }
 
   // ═══════════════════════════════════════════════════════
@@ -208,6 +235,7 @@ export class RoadScene {
     this.drawSky(ctx, phase);
     this.drawStars(ctx, phase);
     this.drawDistantSkyline(ctx, phase);
+    if (this.skylineFog) this.drawSkylineFog(ctx, phase);
     // this.drawSideFacades(ctx, phase, state);
     this.drawRoad(ctx, phase, state);
     // this.drawStreetLamps(ctx, phase);
@@ -284,6 +312,80 @@ export class RoadScene {
     this.drawSkylineLayer(ctx, phase, 0.7, 20, 0.7, 0);
     // Layer 3: near buildings (detailed)
     this.drawSkylineLayer(ctx, phase, 1.0, 24, 1.0, 0.5);
+  }
+
+  /** Short fade at the bottom edge of the skyline so buildings don't cut hard against the road */
+  private drawSkylineFog(ctx: CanvasRenderingContext2D, _phase: number): void {
+    const grad = ctx.createLinearGradient(0, HORIZON_Y - 30, 0, HORIZON_Y);
+    grad.addColorStop(0, 'rgba(4,12,8,0)');
+    grad.addColorStop(1, 'rgba(4,12,8,1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, HORIZON_Y - 30, W, 30);
+  }
+
+  private drawStreetLampsAnimated(ctx: CanvasRenderingContext2D, _phase: number, state: GameState): void {
+    const spacing = 0.22;
+    const obstacleSpeed = [0.007, 0.012, 0.018, 0.026, 0.042][state.chasePhase - 1];
+    {
+      const spd = (state.phase === 'RUNNING' || this.serverRoundRunning) ? obstacleSpeed : 0.005;
+      this.lampOffset += spd;
+      if (this.lampOffset >= spacing) this.lampOffset -= spacing;
+    }
+
+    const sides = [
+      { topX: ROAD_L_HOR, botX: -200, dir: 1 },
+      { topX: ROAD_R_HOR, botX: W + 200, dir: -1 },
+    ];
+
+    for (const side of sides) {
+      let t = this.lampOffset;
+      while (t < 1.05) {
+        if (t > 0.05) {
+          const x = side.topX + (side.botX - side.topX) * t;
+          const y = HORIZON_Y + (H - HORIZON_Y) * t;
+          const s = 0.3 + t * 1.2; // scale with perspective
+
+          // Pole
+          const poleH = 75 * s;
+          ctx.save();
+          ctx.strokeStyle = '#1a1a2a';
+          ctx.lineWidth = 2 * s;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y - poleH);
+          ctx.stroke();
+
+          // Arm extending over road
+          const armLen = 12 * s * side.dir;
+          ctx.beginPath();
+          ctx.moveTo(x, y - poleH);
+          ctx.lineTo(x + armLen, y - poleH + 2 * s);
+          ctx.stroke();
+
+          // Light bulb glow
+          const lx = x + armLen;
+          const ly = y - poleH + 2 * s;
+          const glowR = 8 * s;
+          const glow = ctx.createRadialGradient(lx, ly, 0, lx, ly, glowR * 3);
+          glow.addColorStop(0, 'rgba(255,180,60,0.35)');
+          glow.addColorStop(0.4, 'rgba(255,150,30,0.12)');
+          glow.addColorStop(1, 'rgba(255,120,0,0)');
+          ctx.fillStyle = glow;
+          ctx.beginPath();
+          ctx.arc(lx, ly, glowR * 3, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Bulb
+          ctx.fillStyle = 'rgba(255,200,80,0.9)';
+          ctx.beginPath();
+          ctx.arc(lx, ly, 1.5 * s, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.restore();
+        }
+        t += spacing;
+      }
+    }
   }
 
   private drawSkylineLayer(ctx: CanvasRenderingContext2D, phase: number, parallax: number, count: number, brightness: number, baseShift: number): void {
@@ -364,7 +466,7 @@ export class RoadScene {
   // ── Side Facades (scrolling buildings on left/right) ──
 
   private drawSideFacades(ctx: CanvasRenderingContext2D, phase: number, state: GameState): void {
-    if (state.phase === 'RUNNING' && !state.multiplierPaused)
+    if (state.phase === 'RUNNING')
       this.sideFacadeOffset = (this.sideFacadeOffset + 1.6 + state.chasePhase * 0.85) % 400;
 
     this.drawFacadeColumn(ctx, 0, SIDE_W, phase);
@@ -515,17 +617,34 @@ export class RoadScene {
       ctx.restore();
     }
 
+    // Road horizon fog — purple fade at the top of the road
+    if (this.roadFog) {
+      const fogBase = FOG_COLORS[phase] || FOG_COLORS[1];
+      const roadFog = ctx.createLinearGradient(0, HORIZON_Y, 0, HORIZON_Y + 40);
+      roadFog.addColorStop(0, fogBase);
+      roadFog.addColorStop(1, fogBase + '00');
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(ROAD_L_HOR - 30, HORIZON_Y); ctx.lineTo(ROAD_R_HOR + 30, HORIZON_Y);
+      ctx.lineTo(W + 200, HORIZON_Y + 40); ctx.lineTo(-200, HORIZON_Y + 40);
+      ctx.closePath();
+      ctx.fillStyle = roadFog;
+      ctx.fill();
+      ctx.restore();
+    }
+
     // Sidewalks — slightly lighter with curb line
     ctx.save();
     const swGrad = ctx.createLinearGradient(0, HORIZON_Y, 0, H);
     swGrad.addColorStop(0, '#0c0514');
     swGrad.addColorStop(1, '#08030e');
     ctx.fillStyle = swGrad;
-    // Left sidewalk — follows road perspective
-    ctx.beginPath(); ctx.moveTo(ROAD_L_HOR, HORIZON_Y); ctx.lineTo(0, HORIZON_Y);
+    // Left sidewalk — converges to vanishing point
+    const vpX = (ROAD_L_HOR + ROAD_R_HOR) / 2;
+    ctx.beginPath(); ctx.moveTo(vpX, HORIZON_Y); ctx.lineTo(0, HORIZON_Y);
     ctx.lineTo(0, H); ctx.lineTo(-200, H); ctx.closePath(); ctx.fill();
     // Right sidewalk
-    ctx.beginPath(); ctx.moveTo(ROAD_R_HOR, HORIZON_Y); ctx.lineTo(W, HORIZON_Y);
+    ctx.beginPath(); ctx.moveTo(vpX, HORIZON_Y); ctx.lineTo(W, HORIZON_Y);
     ctx.lineTo(W, H); ctx.lineTo(W + 200, H); ctx.closePath(); ctx.fill();
     ctx.restore();
 
@@ -542,11 +661,14 @@ export class RoadScene {
 
     this.roadOffset = (this.roadOffset + (2 + state.chasePhase * 1.5)) % 60;
 
+    // Street lamps along curbs — same speed as lane dashes
+    this.drawStreetLampsAnimated(ctx, phase, state);
+
     // Wet road reflections (Phase 2+)
     if (phase >= 2) {
       ctx.save();
       ctx.beginPath(); ctx.moveTo(ROAD_L_HOR, HORIZON_Y); ctx.lineTo(ROAD_R_HOR, HORIZON_Y);
-      ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+      ctx.lineTo(ROAD_R_BOT, H); ctx.lineTo(ROAD_L_BOT, H); ctx.closePath();
       const refGrad = ctx.createLinearGradient(0, HORIZON_Y, 0, H);
       refGrad.addColorStop(0, 'transparent');
       const refIntensity = Math.min(0.18, (phase - 1) * 0.05);
@@ -558,35 +680,57 @@ export class RoadScene {
       ctx.restore();
     }
 
-    // Lane dividers — 2 lines splitting road into 3 equal lanes
-    // Interpolate along the same perspective as curb lines:
-    // curb left:  ROAD_L_HOR at HORIZON_Y → -200 at H
-    // curb right: ROAD_R_HOR at HORIZON_Y → W+200 at H
+    // Lane dividers — dashed in rz space, same speed as obstacles
+    const obstacleSpeed = [0.007, 0.012, 0.018, 0.026, 0.042][state.chasePhase - 1];
+    {
+      const dashSpeed = (state.phase === 'RUNNING' || this.serverRoundRunning) ? obstacleSpeed : 0.005;
+      this.laneDashOffset = (this.laneDashOffset + dashSpeed) % 1;
+    }
+    const dashT = 0.06;
+    const gapT = 0.08;
+    const cycleT = dashT + gapT;
+
     for (const frac of [1 / 3, 2 / 3]) {
-      ctx.save();
-      ctx.beginPath();
       const topX = ROAD_L_HOR + (ROAD_R_HOR - ROAD_L_HOR) * frac;
       const botX = -200 + (W + 400) * frac;
-      ctx.moveTo(topX, HORIZON_Y);
-      ctx.lineTo(botX, H);
+
+      ctx.save();
       ctx.shadowColor = '#00FF66';
       ctx.shadowBlur = 6;
       ctx.strokeStyle = 'rgba(0,255,100,0.35)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+
+      let t = -(cycleT - this.laneDashOffset % cycleT);
+      while (t < 1) {
+        const t0 = Math.max(0, t);
+        const t1 = Math.min(1, t + dashT);
+        if (t1 > t0) {
+          const x0 = topX + (botX - topX) * t0;
+          const x1 = topX + (botX - topX) * t1;
+          const y0 = HORIZON_Y + (H - HORIZON_Y) * t0;
+          const y1 = HORIZON_Y + (H - HORIZON_Y) * t1;
+          ctx.lineWidth = 0.5 + t0 * 2.5;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+        }
+        t += cycleT;
+      }
       ctx.restore();
     }
 
     // Horizon fog — road fades into the skyline
-    ctx.save();
-    const fogH = 80;
-    const fogGrad = ctx.createLinearGradient(0, HORIZON_Y - 10, 0, HORIZON_Y + fogH);
-    fogGrad.addColorStop(0, 'rgba(4,12,8,1)');
-    fogGrad.addColorStop(0.4, 'rgba(4,12,8,0.85)');
-    fogGrad.addColorStop(1, 'rgba(4,12,8,0)');
-    ctx.fillStyle = fogGrad;
-    ctx.fillRect(0, HORIZON_Y - 10, W, fogH + 10);
-    ctx.restore();
+    if (this.roadFog) {
+      ctx.save();
+      const fogH = 45;
+      const fogGrad = ctx.createLinearGradient(0, HORIZON_Y - 5, 0, HORIZON_Y + fogH);
+      fogGrad.addColorStop(0, 'rgba(4,12,8,1)');
+      fogGrad.addColorStop(0.4, 'rgba(4,12,8,0.85)');
+      fogGrad.addColorStop(1, 'rgba(4,12,8,0)');
+      ctx.fillStyle = fogGrad;
+      ctx.fillRect(0, HORIZON_Y - 5, W, fogH + 5);
+      ctx.restore();
+    }
   }
 
   // ── Street Lamps ──
@@ -676,6 +820,7 @@ export class RoadScene {
 
   private drawObstaclesPixi(state: GameState): void {
     this.obstacleGfx.clear();
+    this.obstacleGfx.removeChildren();
     const speed = [0.007, 0.012, 0.018, 0.026, 0.042][state.chasePhase - 1];
 
     // if (state.phase === 'RUNNING' && Math.random() < 0.02 + state.chasePhase * 0.005) this.spawnObstacle();
@@ -685,23 +830,21 @@ export class RoadScene {
     this.obstacles.sort((a, b) => a.rz - b.rz);
 
     for (const o of this.obstacles) {
-      if (state.phase === 'RUNNING' && !state.multiplierPaused) o.rz += speed;
+      if (state.phase === 'RUNNING' || this.serverRoundRunning) o.rz += speed;
       const { x, y, scale } = roadToScreen(o.rx, o.rz);
-      if (o.type === 'police') this.drawPoliceCarPixi(x, y, scale);
-      else if (o.type === 'car') this.drawCivilianCarPixi(x, y, scale, parseInt(o.color.slice(1), 16));
-      else if (o.type === 'civilian') this.drawPedestrianPixi(x, y, scale);
-      else if (o.type === 'cyclist') this.drawCyclistPixi(x, y, scale);
-      else if (o.type === 'barricade') this.drawBarricadePixi(x, y, scale);
-      else if (o.type === 'spikes') this.drawSpikesPixi(x, y, scale);
+      const wide = o.lanes === 2;
+      if (o.type === 'police') this.drawPoliceCarPixi(x, y, scale, this.obstacleGfx, o.rx, o.rz);
+      else if (o.type === 'barricade') wide ? this.drawBarricadeWidePixi(x, y, scale) : this.drawBarricadePixi(x, y, scale);
+      else if (o.type === 'spikes') wide ? this.drawSpikesWidePixi(x, y, scale) : this.drawSpikesPixi(x, y, scale);
       else if (o.type === 'dumpster') this.drawDumpsterPixi(x, y, scale);
       else if (o.type === 'cones') this.drawConesPixi(x, y, scale);
-      else if (o.type === 'flipped_car') this.drawFlippedCarPixi(x, y, scale);
-      else if (o.type === 'electric_puddle') this.drawElectricPuddlePixi(x, y, scale);
+      else if (o.type === 'flipped_car') wide ? this.drawFlippedTruckPixi(x, y, scale) : this.drawFlippedCarPixi(x, y, scale);
+      else if (o.type === 'electric_puddle') wide ? this.drawElectricPuddleWidePixi(x, y, scale) : this.drawElectricPuddlePixi(x, y, scale);
     }
 
     this.nitros = this.nitros.filter(n => n.rz < 1.1 && !n.collected);
     for (const n of this.nitros) {
-      if (state.phase === 'RUNNING') n.rz += speed * 0.9;
+      if (state.phase === 'RUNNING' || this.serverRoundRunning) n.rz += speed * 0.9;
       n.glow = (n.glow + 0.1) % (Math.PI * 2);
       const { x, y, scale } = roadToScreen(n.rx, n.rz);
       const glow = Math.sin(n.glow);
@@ -712,59 +855,253 @@ export class RoadScene {
     }
   }
 
-  private drawCivilianCarPixi(x: number, y: number, scale: number, color: number): void {
-    const w = 36 * scale, h = 58 * scale;
-    const g = this.obstacleGfx;
-    // Body with rounded top
-    g.roundRect(x - w / 2, y - h / 2, w, h, 5 * scale).fill({ color });
-    // Roof (darker)
-    g.roundRect(x - w / 2 + 3 * scale, y - h / 2 + 8 * scale, w - 6 * scale, h * 0.3, 3 * scale)
-      .fill({ color: 0x000000, alpha: 0.3 });
-    // Windshield
-    g.rect(x - w / 2 + 4 * scale, y - h / 2 + 12 * scale, w - 8 * scale, h * 0.15)
-      .fill({ color: 0x88BBFF, alpha: 0.3 });
-    // Tail lights
-    g.rect(x - w / 2 + 2 * scale, y + h / 2 - 5 * scale, 4 * scale, 3 * scale).fill({ color: 0xFF2200, alpha: 0.8 });
-    g.rect(x + w / 2 - 6 * scale, y + h / 2 - 5 * scale, 4 * scale, 3 * scale).fill({ color: 0xFF2200, alpha: 0.8 });
-  }
+  public drawPoliceCarPixi(x: number, y: number, scale: number, g = this.obstacleGfx, rx = 0, rz = 0.5): void {
+    const carW = 85;
+    const roadH = H - HORIZON_Y;
 
-  private drawPoliceCarPixi(x: number, y: number, scale: number): void {
-    const w = 38 * scale, h = 60 * scale;
-    const g = this.obstacleGfx;
-    // Body — dark blue/black
-    g.roundRect(x - w / 2, y - h / 2, w, h, 5 * scale).fill({ color: 0x0A0A2A });
-    // White stripe
-    g.rect(x - w / 2 + 2 * scale, y - h / 2 + h * 0.35, w - 4 * scale, h * 0.08).fill({ color: 0xFFFFFF, alpha: 0.7 });
-    // Light bar — flashing
+    // Car height in rz-space, derived from screen height and scale
+    const screenH = 135 * scale;
+    const halfRz = (screenH / roadH) / 2;
+    const rzTop = Math.max(0.005, rz - halfRz);
+    const rzBot = Math.min(1, rz + halfRz);
+
+    // Sample the ACTUAL road perspective at top and bottom of car
+    const pTop = roadToScreen(rx, rzTop);
+    const pBot = roadToScreen(rx, rzBot);
+
+    const wT = carW * pTop.scale / 2;
+    const wB = carW * pBot.scale / 2;
+
+    // Lerp helper: fraction 0=top, 1=bot
+    const lerpX = (f: number) => pTop.x + (pBot.x - pTop.x) * f;
+    const lerpY = (f: number) => pTop.y + (pBot.y - pTop.y) * f;
+    const lerpW = (f: number) => wT + (wB - wT) * f;
+
+    // 3D depth offset — side panel height
+    const depth = 10 * pBot.scale;
+    // Side direction: show the side facing center of road
+    const sideDir = rx < -0.1 ? 1 : rx > 0.1 ? -1 : 0;
+    const sideOff = depth * sideDir * 0.6;
+
+    // ── Shadow on ground ──
+    g.moveTo(pTop.x - wT + 4, pTop.y + 3);
+    g.lineTo(pTop.x + wT + 4, pTop.y + 3);
+    g.lineTo(pBot.x + wB + 4, pBot.y + 3);
+    g.lineTo(pBot.x - wB + 4, pBot.y + 3);
+    g.closePath();
+    g.fill({ color: 0x000000, alpha: 0.25 });
+
+    // ── Side panel (visible side of the car) ──
+    if (sideDir !== 0) {
+      const sign = sideDir > 0 ? 1 : -1;
+      // Right side visible (sideDir=1) → draw on right edge
+      // Left side visible (sideDir=-1) → draw on left edge
+      const edgeTopX = sign > 0 ? pTop.x + wT : pTop.x - wT;
+      const edgeBotX = sign > 0 ? pBot.x + wB : pBot.x - wB;
+      g.moveTo(edgeTopX, pTop.y);
+      g.lineTo(edgeTopX + sideOff, pTop.y - depth);
+      g.lineTo(edgeBotX + sideOff, pBot.y - depth);
+      g.lineTo(edgeBotX, pBot.y);
+      g.closePath();
+      g.fill({ color: 0x060614 });
+
+      // Side windows
+      const sw1f = 0.15, sw2f = 0.55;
+      const seTop1 = sign > 0 ? lerpX(sw1f) + lerpW(sw1f) : lerpX(sw1f) - lerpW(sw1f);
+      const seBot1 = sign > 0 ? lerpX(sw2f) + lerpW(sw2f) : lerpX(sw2f) - lerpW(sw2f);
+      g.moveTo(seTop1 + 2 * sign, lerpY(sw1f));
+      g.lineTo(seTop1 + sideOff * 0.8 + 2 * sign, lerpY(sw1f) - depth * 0.8);
+      g.lineTo(seBot1 + sideOff * 0.8 + 2 * sign, lerpY(sw2f) - depth * 0.8);
+      g.lineTo(seBot1 + 2 * sign, lerpY(sw2f));
+      g.closePath();
+      g.fill({ color: 0x88BBFF, alpha: 0.15 });
+    }
+
+    // ── Top face (roof) — offset upward for 3D ──
+    g.moveTo(pTop.x - wT + sideOff, pTop.y - depth);
+    g.lineTo(pTop.x + wT + sideOff, pTop.y - depth);
+    g.lineTo(pBot.x + wB + sideOff, pBot.y - depth);
+    g.lineTo(pBot.x - wB + sideOff, pBot.y - depth);
+    g.closePath();
+    g.fill({ color: 0x0A0A2A });
+
+    // Front edge (connects top face to ground at front)
+    g.moveTo(pTop.x - wT, pTop.y);
+    g.lineTo(pTop.x + wT, pTop.y);
+    g.lineTo(pTop.x + wT + sideOff, pTop.y - depth);
+    g.lineTo(pTop.x - wT + sideOff, pTop.y - depth);
+    g.closePath();
+    g.fill({ color: 0x080820 });
+
+    // ── Details on top face ──
+    // Roof/cabin (frac 0.06 to 0.4)
+    const r1 = 0.06, r2 = 0.4;
+    const rw1 = lerpW(r1) * 0.7, rw2 = lerpW(r2) * 0.7;
+    g.moveTo(lerpX(r1) - rw1 + sideOff, lerpY(r1) - depth);
+    g.lineTo(lerpX(r1) + rw1 + sideOff, lerpY(r1) - depth);
+    g.lineTo(lerpX(r2) + rw2 + sideOff, lerpY(r2) - depth);
+    g.lineTo(lerpX(r2) - rw2 + sideOff, lerpY(r2) - depth);
+    g.closePath();
+    g.fill({ color: 0x000000, alpha: 0.3 });
+
+    // White stripe (frac 0.35 to 0.42)
+    const s1 = 0.35, s2 = 0.42;
+    const sw1 = lerpW(s1) * 0.95, sw2 = lerpW(s2) * 0.95;
+    g.moveTo(lerpX(s1) - sw1 + sideOff, lerpY(s1) - depth);
+    g.lineTo(lerpX(s1) + sw1 + sideOff, lerpY(s1) - depth);
+    g.lineTo(lerpX(s2) + sw2 + sideOff, lerpY(s2) - depth);
+    g.lineTo(lerpX(s2) - sw2 + sideOff, lerpY(s2) - depth);
+    g.closePath();
+    g.fill({ color: 0xFFFFFF, alpha: 0.7 });
+
+    // Light bar — flashing at front
     const sc = Math.floor(Date.now() / 150) % 2 === 0;
-    g.rect(x - w / 2 + 3 * scale, y - h / 2 + 2 * scale, w / 2 - 4 * scale, 6 * scale)
+    const lbX = lerpX(0.01) + sideOff;
+    const lbY = lerpY(0.01) - depth;
+    const lbW = wT * 0.8;
+    const lbH = 6 * pTop.scale;
+    g.rect(lbX - lbW, lbY, lbW - 1, lbH)
       .fill({ color: sc ? 0xEF4444 : 0x2563EB });
-    g.rect(x + 1 * scale, y - h / 2 + 2 * scale, w / 2 - 4 * scale, 6 * scale)
+    g.rect(lbX + 1, lbY, lbW - 1, lbH)
       .fill({ color: sc ? 0x2563EB : 0xEF4444 });
+
+    // Tail lights at rear
+    const tlS = pBot.scale * 3;
+    g.rect(pBot.x - wB + 3 * pBot.scale + sideOff, pBot.y - 5 * pBot.scale - depth, tlS * 1.5, tlS)
+      .fill({ color: 0xFF2200, alpha: 0.8 });
+    g.rect(pBot.x + wB - 3 * pBot.scale - tlS * 1.5 + sideOff, pBot.y - 5 * pBot.scale - depth, tlS * 1.5, tlS)
+      .fill({ color: 0xFF2200, alpha: 0.8 });
+
     // Headlights glow
-    g.circle(x - w / 2 + 5 * scale, y + h / 2 - 3 * scale, 3 * scale).fill({ color: 0xFFFFCC, alpha: 0.6 });
-    g.circle(x + w / 2 - 5 * scale, y + h / 2 - 3 * scale, 3 * scale).fill({ color: 0xFFFFCC, alpha: 0.6 });
+    g.circle(pBot.x - wB + 5 * pBot.scale + sideOff, pBot.y - 3 * pBot.scale - depth, 3 * pBot.scale)
+      .fill({ color: 0xFFFFCC, alpha: 0.6 });
+    g.circle(pBot.x + wB - 5 * pBot.scale + sideOff, pBot.y - 3 * pBot.scale - depth, 3 * pBot.scale)
+      .fill({ color: 0xFFFFCC, alpha: 0.6 });
   }
 
-  private drawPedestrianPixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
-    g.circle(x, y - 18 * scale, 6 * scale).fill({ color: 0xFFDDBB });
-    const bodyColors = [0x3A5A8A, 0x8A3A5A, 0x3A8A5A, 0x6A4A2A];
-    g.rect(x - 5 * scale, y - 12 * scale, 10 * scale, 16 * scale)
-      .fill({ color: bodyColors[Math.floor(Date.now() / 2000) % 4] });
+  /** Draw a car-type obstacle with perspective rotation using a child Graphics */
+  private drawCarRotated(
+    x: number, y: number, scale: number, angle: number,
+    drawFn: (x: number, y: number, scale: number, g: Graphics) => void,
+  ): void {
+    const child = new Graphics();
+    child.position.set(x, y);
+    child.rotation = angle;
+    drawFn(0, 0, scale, child);
+    this.obstacleGfx.addChild(child);
   }
 
-  private drawCyclistPixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
-    g.circle(x - 8 * scale, y + 4 * scale, 6 * scale).stroke({ color: 0x888888, width: 1.5 * scale });
-    g.circle(x + 8 * scale, y + 4 * scale, 6 * scale).stroke({ color: 0x888888, width: 1.5 * scale });
-    g.circle(x, y - 14 * scale, 5 * scale).fill({ color: 0xDDDDDD });
+  // ══ 2-LANE VARIANTS ══
+
+  // ── Barricada doble — longer, more stripes, 3 lights ──
+  public drawBarricadeWidePixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const w = 240 * scale, h = 45 * scale;
+    g.roundRect(x - w / 2, y - h / 2, w, h, 4 * scale).fill({ color: 0xCC0000 });
+    // White stripes — more of them
+    for (let i = 0; i < 7; i++) {
+      g.rect(x - w / 2 + (i * 2 + 1) * (w / 14), y - h / 2, w / 14, h)
+        .fill({ color: 0xFFFFFF, alpha: 0.85 });
+    }
+    // 3 flashing lights
+    const flash = Math.floor(Date.now() / 200) % 2 === 0;
+    g.circle(x - w / 3, y - h / 2 - 5 * scale, 3.5 * scale)
+      .fill({ color: flash ? 0xFF0000 : 0x330000 });
+    g.circle(x, y - h / 2 - 5 * scale, 3.5 * scale)
+      .fill({ color: flash ? 0x330000 : 0xFF0000 });
+    g.circle(x + w / 3, y - h / 2 - 5 * scale, 3.5 * scale)
+      .fill({ color: flash ? 0xFF0000 : 0x330000 });
+    // Support legs — 3
+    g.rect(x - w / 2 + 5 * scale, y + h / 2, 3 * scale, 9 * scale).fill({ color: 0x444444 });
+    g.rect(x - 1.5 * scale, y + h / 2, 3 * scale, 9 * scale).fill({ color: 0x444444 });
+    g.rect(x + w / 2 - 8 * scale, y + h / 2, 3 * scale, 9 * scale).fill({ color: 0x444444 });
+  }
+
+  // ── Spike strip doble — more spikes, wider ──
+  public drawSpikesWidePixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const w = 210 * scale, h = 14 * scale;
+    g.roundRect(x - w / 2, y - h / 2, w, h, 2 * scale).fill({ color: 0x222222 });
+    const spikeCount = 15;
+    for (let i = 0; i < spikeCount; i++) {
+      const sx = x - w / 2 + (i + 0.5) * (w / spikeCount);
+      g.moveTo(sx - 2 * scale, y + h / 2);
+      g.lineTo(sx, y - h * 1.3);
+      g.lineTo(sx + 2 * scale, y + h / 2);
+      g.fill({ color: 0xCCCCCC, alpha: 0.9 });
+    }
+    // Warning yellow edges + center marker
+    g.rect(x - w / 2, y - h / 2, 4 * scale, h).fill({ color: 0xEAB308, alpha: 0.8 });
+    g.rect(x + w / 2 - 4 * scale, y - h / 2, 4 * scale, h).fill({ color: 0xEAB308, alpha: 0.8 });
+    g.rect(x - 2 * scale, y - h / 2, 4 * scale, h).fill({ color: 0xEAB308, alpha: 0.5 });
+  }
+
+  // ── Camión volcado (replaces flipped car at 2 lanes) ──
+  public drawFlippedTruckPixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const w = 220 * scale, h = 70 * scale;
+    // Truck body on its side
+    g.roundRect(x - w / 2, y - h / 2, w, h, 5 * scale).fill({ color: 0x2A2A3A });
+    // Cargo area — darker panel
+    g.rect(x - w / 2 + 8 * scale, y - h / 2 + 3 * scale, w * 0.55, h - 6 * scale)
+      .fill({ color: 0x1A1A28 });
+    // Cab section
+    g.roundRect(x + w / 2 - 28 * scale, y - h / 2 + 2 * scale, 24 * scale, h - 4 * scale, 3 * scale)
+      .fill({ color: 0x333345 });
+    // Broken windshield on cab
+    g.rect(x + w / 2 - 26 * scale, y - h / 2 + 5 * scale, 10 * scale, h * 0.5)
+      .fill({ color: 0x88BBFF, alpha: 0.15 });
+    // Undercarriage
+    g.rect(x - w / 2 + 10 * scale, y + h / 2 - 3 * scale, w - 20 * scale, 5 * scale)
+      .fill({ color: 0x111111 });
+    // 3 pairs of wheels
+    for (const wx of [-w / 3, 0, w / 3]) {
+      g.circle(x + wx, y + h / 2 + 3 * scale, 8 * scale).fill({ color: 0x111111 });
+      g.circle(x + wx, y + h / 2 + 3 * scale, 5 * scale).fill({ color: 0x2A2A2A });
+    }
+    // Smoke/fire
+    const t = Date.now() / 300;
+    g.circle(x - w / 4, y - h / 2 - 6 * scale, (5 + Math.sin(t) * 2) * scale)
+      .fill({ color: 0x444444, alpha: 0.35 });
+    g.circle(x - w / 4 + 8 * scale, y - h / 2 - 10 * scale, (4 + Math.sin(t + 1) * 2) * scale)
+      .fill({ color: 0x333333, alpha: 0.25 });
+    // Hazard stripes on cargo
+    for (let i = 0; i < 3; i++) {
+      g.rect(x - w / 2 + 12 * scale + i * 18 * scale, y - h / 2 + 4 * scale, 6 * scale, h - 8 * scale)
+        .fill({ color: 0xEAB308, alpha: 0.15 });
+    }
+  }
+
+  // ── Charco eléctrico grande — wider puddle, more sparks, downed power line ──
+  public drawElectricPuddleWidePixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    // Larger puddle
+    g.ellipse(x, y, 110 * scale, 30 * scale).fill({ color: 0x1A3050, alpha: 0.6 });
+    g.ellipse(x, y, 88 * scale, 22 * scale).fill({ color: 0x2A5080, alpha: 0.4 });
+    // Downed power line cable — jagged
+    g.moveTo(x - 85 * scale, y - 3 * scale);
+    g.lineTo(x - 45 * scale, y + 4 * scale);
+    g.lineTo(x - 10 * scale, y - 2 * scale);
+    g.lineTo(x + 30 * scale, y + 5 * scale);
+    g.lineTo(x + 60 * scale, y - 1 * scale);
+    g.lineTo(x + 90 * scale, y + 3 * scale);
+    g.stroke({ color: 0x222222, width: 4 * scale });
+    // Animated sparks — 9 points
+    const t = Date.now() / 80;
+    for (let i = 0; i < 9; i++) {
+      const angle = (t + i * 40) % 360 * (Math.PI / 180);
+      const dist = (30 + Math.sin(t * 0.1 + i) * 16) * scale;
+      const sx = x + Math.cos(angle) * dist;
+      const sy = y + Math.sin(angle) * dist * 0.3;
+      const sparkSize = (3 + Math.sin(t * 0.3 + i * 2) * 1.5) * scale;
+      g.circle(sx, sy, sparkSize).fill({ color: 0x00DDFF, alpha: 0.7 + Math.sin(t * 0.2 + i) * 0.3 });
+    }
+    // Three glow points
+    const glowAlpha = 0.3 + Math.sin(t * 0.15) * 0.2;
+    g.circle(x - 35 * scale, y, 10 * scale).fill({ color: 0x00AAFF, alpha: glowAlpha });
+    g.circle(x, y, 10 * scale).fill({ color: 0x00AAFF, alpha: glowAlpha * 0.9 });
+    g.circle(x + 35 * scale, y, 10 * scale).fill({ color: 0x00AAFF, alpha: glowAlpha * 0.8 });
   }
 
   // ── Barricada policial ──
-  private drawBarricadePixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
-    const w = 60 * scale, h = 20 * scale;
+  public drawBarricadePixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const w = 130 * scale, h = 40 * scale;
     // Base barrier — striped red/white
     g.roundRect(x - w / 2, y - h / 2, w, h, 3 * scale).fill({ color: 0xCC0000 });
     // White stripes
@@ -784,9 +1121,8 @@ export class RoadScene {
   }
 
   // ── Spike strip ──
-  private drawSpikesPixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
-    const w = 50 * scale, h = 6 * scale;
+  public drawSpikesPixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const w = 110 * scale, h = 12 * scale;
     // Base strip
     g.roundRect(x - w / 2, y - h / 2, w, h, 2 * scale).fill({ color: 0x222222 });
     // Spikes
@@ -804,9 +1140,8 @@ export class RoadScene {
   }
 
   // ── Contenedor de basura ──
-  private drawDumpsterPixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
-    const w = 34 * scale, h = 28 * scale;
+  public drawDumpsterPixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const w = 75 * scale, h = 60 * scale;
     // Body — dark green metal
     g.roundRect(x - w / 2, y - h / 2, w, h, 3 * scale).fill({ color: 0x1A5C2A });
     // Lid — slightly lighter, tilted
@@ -823,30 +1158,28 @@ export class RoadScene {
   }
 
   // ── Conos de construcción ──
-  private drawConesPixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
-    const positions = [-10, 0, 10];
+  public drawConesPixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const positions = [-45, -15, 15, 45];
     for (const off of positions) {
       const cx = x + off * scale;
-      const coneH = 18 * scale;
+      const coneH = 42 * scale;
       // Cone body — orange triangle
       g.moveTo(cx, y - coneH);
-      g.lineTo(cx - 6 * scale, y);
-      g.lineTo(cx + 6 * scale, y);
+      g.lineTo(cx - 14 * scale, y);
+      g.lineTo(cx + 14 * scale, y);
       g.fill({ color: 0xEA580C });
       // White stripe
-      g.rect(cx - 4 * scale, y - coneH * 0.5, 8 * scale, 3 * scale)
+      g.rect(cx - 10 * scale, y - coneH * 0.5, 20 * scale, 5 * scale)
         .fill({ color: 0xFFFFFF, alpha: 0.85 });
       // Base
-      g.rect(cx - 7 * scale, y, 14 * scale, 3 * scale)
+      g.rect(cx - 16 * scale, y, 32 * scale, 5 * scale)
         .fill({ color: 0xEA580C, alpha: 0.7 });
     }
   }
 
   // ── Carro volcado ──
-  private drawFlippedCarPixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
-    const w = 54 * scale, h = 26 * scale;
+  public drawFlippedCarPixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
+    const w = 120 * scale, h = 55 * scale;
     // Car body on its side — tilted
     g.roundRect(x - w / 2, y - h / 2, w, h, 4 * scale).fill({ color: 0x3A3A4A });
     // Undercarriage visible
@@ -866,48 +1199,125 @@ export class RoadScene {
   }
 
   // ── Charco eléctrico ──
-  private drawElectricPuddlePixi(x: number, y: number, scale: number): void {
-    const g = this.obstacleGfx;
+  public drawElectricPuddlePixi(x: number, y: number, scale: number, g = this.obstacleGfx): void {
     // Water puddle
-    g.ellipse(x, y, 28 * scale, 10 * scale).fill({ color: 0x1A3050, alpha: 0.6 });
-    g.ellipse(x, y, 22 * scale, 7 * scale).fill({ color: 0x2A5080, alpha: 0.4 });
+    g.ellipse(x, y, 60 * scale, 22 * scale).fill({ color: 0x1A3050, alpha: 0.6 });
+    g.ellipse(x, y, 48 * scale, 16 * scale).fill({ color: 0x2A5080, alpha: 0.4 });
     // Sparking cable
-    g.rect(x - 15 * scale, y - 2 * scale, 30 * scale, 3 * scale)
+    g.rect(x - 30 * scale, y - 2 * scale, 60 * scale, 3 * scale)
       .fill({ color: 0x222222 });
     // Animated sparks
     const t = Date.now() / 80;
-    for (let i = 0; i < 4; i++) {
-      const angle = (t + i * 90) % 360 * (Math.PI / 180);
-      const dist = (8 + Math.sin(t * 0.1 + i) * 5) * scale;
+    for (let i = 0; i < 5; i++) {
+      const angle = (t + i * 72) % 360 * (Math.PI / 180);
+      const dist = (18 + Math.sin(t * 0.1 + i) * 10) * scale;
       const sx = x + Math.cos(angle) * dist;
       const sy = y + Math.sin(angle) * dist * 0.4;
-      const sparkSize = (1.5 + Math.sin(t * 0.3 + i * 2) * 1) * scale;
+      const sparkSize = (2.5 + Math.sin(t * 0.3 + i * 2) * 1.5) * scale;
       g.circle(sx, sy, sparkSize).fill({ color: 0x00DDFF, alpha: 0.7 + Math.sin(t * 0.2 + i) * 0.3 });
     }
     // Central glow
     const glowAlpha = 0.3 + Math.sin(t * 0.15) * 0.2;
-    g.circle(x, y, 6 * scale).fill({ color: 0x00AAFF, alpha: glowAlpha });
+    g.circle(x, y, 10 * scale).fill({ color: 0x00AAFF, alpha: glowAlpha });
   }
 
   private drawPursuersPixi(phase: number, state: GameState): void {
     this.pursuerGfx.clear();
-    if (phase < 2 || state.phase === 'IDLE' || state.phase === 'COUNTDOWN') return;
-    if (phase === 5) return;
+    if (phase < 4 || state.phase === 'IDLE' || state.phase === 'COUNTDOWN') return;
 
     const bounce = Math.sin(Date.now() / 180) * 3;
     const draw = (rx: number, rz: number, yOff: number) => {
       const p = roadToScreen(rx, rz);
-      this.drawPoliceCarPixi(p.x, p.y + yOff, p.scale);
+      this.drawPoliceCarPixi(p.x, p.y + yOff, p.scale, this.pursuerGfx, rx, rz);
     };
-    draw(-0.667, 0.62, bounce);
-    draw(0.667, 0.62, Math.sin(Date.now() / 180 + 1) * 3);
-    if (phase >= 3) { draw(-0.667, 0.76, 0); draw(0.667, 0.76, 0); }
-    if (phase >= 4) { draw(0, 0.87, 0); }
+    // Phase 3+: one car
+    draw(0, 0.62, bounce);
   }
 
-  // ── Kash Rider (gorilla on motorbike) ──
+  // ── Kash Rider (sprite) ──
 
-  private drawRiderPixi(phase: number, state: GameState): void {
+  async loadRiderSprite(): Promise<void> {
+    const { Assets } = await import('pixi.js');
+    const texture = await Assets.load({
+      src: '/src/assets/kash-en-moto.webp',
+      data: { scaleMode: 'linear', autoGenerateMipmaps: true },
+    });
+    this.riderSprite = new Sprite(texture);
+    this.riderSprite.anchor.set(0.5, 1);
+    this.riderContainer.addChild(this.riderSprite);
+  }
+
+  private updateRiderSprite(state: GameState): void {
+    if (!this.riderSprite) return;
+
+    // Animate toward target lane
+    const diff = this.riderLane - this.riderLaneActual;
+    if (Math.abs(diff) > 0.001) {
+      this.riderLaneActual += diff * this.riderLaneSpeed;
+    } else {
+      this.riderLaneActual = this.riderLane;
+    }
+
+    // Animate toward target depth
+    const depthDiff = this.riderDepth - this.riderDepthActual;
+    if (Math.abs(depthDiff) > 0.001) {
+      this.riderDepthActual += depthDiff * 0.04;
+    } else {
+      this.riderDepthActual = this.riderDepth;
+    }
+
+    const rz = this.riderDepthActual;
+    const sway = Math.sin(Date.now() / 700) * 0.02;
+    const p = roadToScreen(this.riderLaneActual + sway, rz);
+
+    // Scale sprite to fit ~1 lane width
+    const laneWidth = (ROAD_R_BOT - ROAD_L_BOT) * rz + (ROAD_R_HOR - ROAD_L_HOR) * (1 - rz);
+    const targetW = laneWidth / 3 * 0.7;
+    const spriteScale = targetW / (this.riderSprite.texture.width || 400);
+
+    // Tilt during lane change
+    const tilt = -(this.riderLane - this.riderLaneActual) * 1.2;
+    const maxTilt = 0.25;
+    this.riderSprite.rotation = Math.max(-maxTilt, Math.min(maxTilt, tilt));
+
+    this.riderSprite.x = p.x;
+    this.riderSprite.y = p.y;
+    this.riderSprite.scale.set(spriteScale);
+
+    // Darken Kash when it rains + siren color tint (phase 2+)
+    const phase = state.chasePhase;
+    if (phase >= 2) {
+      const dim = 1 - Math.min(0.35, (phase - 1) * 0.1);
+      const cycle = Math.floor(Date.now() / 300) % 2;
+      const sirenStrength = phase >= 4 ? 0.15 : 0.08;
+      let r = dim, g = dim, b = dim;
+      if (cycle === 0) { r = Math.min(1, dim + sirenStrength); } // red flash
+      else { b = Math.min(1, dim + sirenStrength); } // blue flash
+      this.riderSprite.tint = (Math.floor(r * 255) << 16) | (Math.floor(g * 255) << 8) | Math.floor(b * 255);
+    } else {
+      this.riderSprite.tint = 0xFFFFFF;
+    }
+
+    // Sparks from tire during lane change
+    if (Math.abs(diff) > 0.01) {
+      const sparkCount = Math.min(3, Math.ceil(Math.abs(diff) * 8));
+      for (let i = 0; i < sparkCount; i++) {
+        this.sparks.push({
+          x: p.x + (Math.random() - 0.5) * 20 * p.scale,
+          y: p.y - 2,
+          vx: -diff * 15 + (Math.random() - 0.5) * 4,
+          vy: (Math.random() * 3) - 1,
+          life: 1,
+          size: 1.5 + Math.random() * 2.5,
+          color: ['#ff8800', '#ffaa00', '#ffdd00', '#ffffff'][Math.floor(Math.random() * 4)],
+        });
+      }
+    }
+  }
+
+  // ── Kash Rider (old procedural — kept for reference) ──
+
+  private drawRiderPixi_old(phase: number, state: GameState): void {
     this.riderGfx.clear();
     const cx = W / 2;
     const cy = 555;
@@ -1052,7 +1462,7 @@ export class RoadScene {
 
   private drawHelicopterPixi(phase: number, state: GameState): void {
     this.heliGfx.clear();
-    if (phase < 3 || !state.helicopterActive) return;
+    if (phase < 4 || !state.helicopterActive) return;
 
     const elapsed = (Date.now() - state.heliStartTime!) / 4000;
     const beamAngle = Math.sin(elapsed * Math.PI * 2) * 0.5;
@@ -1151,33 +1561,22 @@ export class RoadScene {
 
   private drawEffectsFront(phase: number, state: GameState): void {
     this.effectsFront.clear();
-    if (phase < 2) return;
+    if (phase < 2 || !this.riderSprite) return;
 
-    // Speed lines — radiate from rider
+    // Speed lines — radiate from Kash's current position
+    const cx = this.riderSprite.x;
+    const cy = this.riderSprite.y - this.riderSprite.height * this.riderSprite.scale.y * this.speedLineHeight;
     const intensity = (phase - 1) / 4;
-    const cx = W / 2, cy = 555;
-    const lineCount = phase === 5 ? 35 : 22;
+    const lineCount = Math.min(25, 10 + phase * 3);
     for (let i = 0; i < lineCount; i++) {
       const angle = (i / lineCount) * Math.PI * 2 + (Date.now() / 5000);
-      const r1 = 90 + Math.random() * 40;
-      const r2 = r1 + 80 + Math.random() * 120;
-      const lineAlpha = phase === 5 ? 0.06 + intensity * 0.08 : 0.02 + intensity * 0.04;
-      const lineColor = phase === 5 ? 0xC084FC : 0xFFFFFF;
+      const r1 = this.speedLineInner + Math.random() * 30;
+      const r2 = r1 + (this.speedLineOuter - this.speedLineInner) + Math.random() * 40;
+      const lineAlpha = 0.02 + intensity * 0.04;
       this.effectsFront
         .moveTo(cx + Math.cos(angle) * r1, cy + Math.sin(angle) * r1)
         .lineTo(cx + Math.cos(angle) * r2, cy + Math.sin(angle) * r2)
-        .stroke({ color: lineColor, width: Math.random() * 2, alpha: lineAlpha });
-    }
-
-    // Ghost mode: purple neon streaks replacing rain
-    if (phase === 5) {
-      for (let i = 0; i < 12; i++) {
-        const sx = Math.random() * W;
-        const sy = Math.random() * H;
-        const sLen = 40 + Math.random() * 80;
-        this.effectsFront.moveTo(sx, sy).lineTo(sx - 5, sy + sLen)
-          .stroke({ color: 0x7B2FBE, width: 2 + Math.random() * 2, alpha: 0.1 + Math.random() * 0.1 });
-      }
+        .stroke({ color: 0xFFFFFF, width: Math.random() * 2, alpha: lineAlpha });
     }
   }
 
@@ -1213,16 +1612,35 @@ export class RoadScene {
   }
 
   private spawnObstacle(): void {
-    const types: Obstacle['type'][] = ['car', 'car', 'car', 'police', 'civilian', 'cyclist'];
+    const types: Obstacle['type'][] = ['police', 'police', 'police'];
     const lanes = [-0.667, 0, 0.667];
     const colors = ['#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#e67e22', '#7f8c8d', '#f39c12'];
-    this.obstacles.push({
-      type: types[Math.floor(Math.random() * types.length)],
-      rx: lanes[Math.floor(Math.random() * 3)],
-      rz: 0.02, speed: 0,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      dodged: false,
-    });
+
+    // Types that can span 2 lanes (wide obstacles)
+    const widePossible: Obstacle['type'][] = ['barricade', 'spikes', 'flipped_car', 'electric_puddle'];
+    // 2-lane positions: centered between two adjacent lanes
+    const dualLanePositions = [-0.333, 0.333]; // between left-center, between center-right
+
+    const useWide = Math.random() < 0.25; // 25% chance of a 2-lane obstacle
+    if (useWide) {
+      this.obstacles.push({
+        type: widePossible[Math.floor(Math.random() * widePossible.length)],
+        rx: dualLanePositions[Math.floor(Math.random() * dualLanePositions.length)],
+        rz: 0.02, speed: 0,
+        color: colors[Math.floor(Math.random() * colors.length)],
+  
+        lanes: 2,
+      });
+    } else {
+      this.obstacles.push({
+        type: types[Math.floor(Math.random() * types.length)],
+        rx: lanes[Math.floor(Math.random() * 3)],
+        rz: 0.02, speed: 0,
+        color: colors[Math.floor(Math.random() * colors.length)],
+  
+        lanes: 1,
+      });
+    }
   }
 
   private spawnNitro(): void {

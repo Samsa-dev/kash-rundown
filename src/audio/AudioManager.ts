@@ -6,6 +6,16 @@
 let audioCtx: AudioContext | null = null;
 let engineOsc: OscillatorNode | null = null;
 let engineGain: GainNode | null = null;
+let muted = false;
+
+export function isMuted(): boolean { return muted; }
+
+export function toggleMute(): boolean {
+  muted = !muted;
+  if (muted && engineGain) engineGain.gain.value = 0;
+  if (!muted && engineGain) engineGain.gain.value = 0.03;
+  return muted;
+}
 
 function getAudio(): AudioContext {
   if (!audioCtx) audioCtx = new AudioContext();
@@ -18,6 +28,7 @@ export function initAudio(): void {
 }
 
 function playTone(freq: number, dur: number, type: OscillatorType = 'sine', vol = 0.08, delay = 0): void {
+  if (muted) return;
   try {
     const ac = getAudio();
     const osc = ac.createOscillator();
@@ -35,6 +46,7 @@ function playTone(freq: number, dur: number, type: OscillatorType = 'sine', vol 
 }
 
 export function playCrash(): void {
+  if (muted) return;
   try {
     const ac = getAudio();
     const osc = ac.createOscillator();
@@ -75,6 +87,7 @@ export function playRoadblock(): void {
 }
 
 export function startEngine(): void {
+  if (muted) return;
   try {
     const ac = getAudio();
     if (engineOsc) { engineOsc.stop(); engineOsc = null; }

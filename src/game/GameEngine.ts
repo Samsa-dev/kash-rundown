@@ -1,19 +1,11 @@
 import { GameState, createInitialState } from './types';
 import { generateCrashPoint, calcMultiplier } from './RNG';
 import { getChasePhase, PHASE_BANNERS } from './Phases';
-import {
-  checkRoadblockThresholds,
-  checkHelicopterActivation,
-  triggerRoadblock,
-  handleDodge,
-  collectNitro,
-} from './Mechanics';
+import { checkHelicopterActivation } from './Mechanics';
 
 type GameEvent =
   | { type: 'PHASE_CHANGE'; phase: number }
-  | { type: 'ROADBLOCK' }
   | { type: 'HELICOPTER_ACTIVATED' }
-  | { type: 'GHOST_MODE' }
   | { type: 'CRASH' }
   | { type: 'CASH_OUT'; amount: number }
   | { type: 'MULTIPLIER_UPDATE'; multiplier: number; profit: number }
@@ -43,17 +35,14 @@ export class GameEngine {
   placeBet(amount: number): boolean {
     if (this.state.phase !== 'IDLE') return false;
     if (amount > this.state.balance) return false;
-    if (amount < 0.10) return false;
+    if (amount < 1) return false;
 
     this.state.bet = amount;
     this.state.phase = 'COUNTDOWN';
     this.state.crashPoint = generateCrashPoint();
     this.state.multiplier = 1.00;
     this.state.chasePhase = 1;
-    this.state.roadblockFired = { r3: false, r10: false, r50: false };
     this.state.helicopterActive = false;
-    this.state.heliActivated = false;
-    this.state.ghostMode = false;
 
     return true;
   }
@@ -68,7 +57,7 @@ export class GameEngine {
 
   private tick(): void {
     const s = this.state;
-    if (s.phase !== 'RUNNING' || s.multiplierPaused || s.roadblockActive) return;
+    if (s.phase !== 'RUNNING') return;
 
     const elapsed = Date.now() - s.startTime!;
     s.multiplier = calcMultiplier(elapsed);
@@ -92,16 +81,6 @@ export class GameEngine {
       this.emit({ type: 'PHASE_CHANGE', phase: newPhase });
       const banner = PHASE_BANNERS[newPhase];
       if (banner) this.emit({ type: 'BANNER', text: banner });
-      if (newPhase === 5) {
-        s.ghostMode = true;
-        this.emit({ type: 'GHOST_MODE' });
-      }
-    }
-
-    // Roadblocks
-    if (checkRoadblockThresholds(s)) {
-      triggerRoadblock(s);
-      this.emit({ type: 'ROADBLOCK' });
     }
 
     // Helicopter
@@ -159,26 +138,11 @@ export class GameEngine {
     this.emit({ type: 'CRASH' });
   }
 
-  dodge(direction: 'LEFT' | 'RIGHT'): boolean {
-    const result = handleDodge(this.state, direction);
-    return result.success;
-  }
-
-  collectNitroBonus(): number {
-    const bonus = 0.5 + Math.random() * 1.5;
-    collectNitro(this.state, bonus);
-    return bonus;
-  }
-
   resetToIdle(): void {
     this.state.phase = 'IDLE';
     this.state.multiplier = 1.00;
     this.state.chasePhase = 1;
-    this.state.ghostMode = false;
-    this.state.roadblockActive = false;
     this.state.helicopterActive = false;
-    if (this.state.roadblockTimer) clearInterval(this.state.roadblockTimer);
-    if (this.state.quoteTimer) clearTimeout(this.state.quoteTimer);
   }
 
   private stopTick(): void {

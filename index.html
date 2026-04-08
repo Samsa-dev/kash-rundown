@@ -5,8 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>KASH RUNDOWN</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,600;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #0F0F1E; }
+  #loading-screen {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #0F0F1E;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+  }
+  #loading-screen.hidden { opacity: 0; pointer-events: none; transition: opacity 0.5s; }
+  #loading-logo { font-family: 'Barlow Condensed', sans-serif; font-size: 32px; font-weight: 900; letter-spacing: 4px; color: #EAB308; text-shadow: 0 0 30px rgba(234,179,8,0.5); }
+  #loading-bar-wrap { width: 200px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+  #loading-bar { width: 0%; height: 100%; background: linear-gradient(90deg, #EAB308, #EA580C); border-radius: 2px; transition: width 0.3s; }
+  #loading-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #505064; letter-spacing: 1px; }
+  #wrap { visibility: hidden; }
+</style>
 </head>
 <body>
+<!-- Loading screen -->
+<div id="loading-screen">
+  <div id="loading-logo">KASH RUNDOWN</div>
+  <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+  <div id="loading-text">Loading...</div>
+</div>
+
 <div id="wrap">
   <div id="pixi-container"></div>
 
@@ -22,16 +44,9 @@
     <div id="top-bar">
       <div id="logo">KASH RUNDOWN</div>
       <div id="balance-display">$<span id="bal-num">1,000.00</span></div>
+      <button id="mute-btn" title="Toggle sound">🔊</button>
     </div>
 
-    <!-- Phase bar -->
-    <div id="phase-bar">
-      <span class="phase-label active" id="pl1">CLEAN RUN</span>
-      <span class="phase-label" id="pl2">▲ SIREN</span>
-      <span class="phase-label" id="pl3">▼ CHOPPER</span>
-      <span class="phase-label" id="pl4">FULL PURSUIT</span>
-      <span class="phase-label" id="pl5">GHOST</span>
-    </div>
 
     <!-- Stats row -->
     <div id="stats-row">
@@ -49,14 +64,10 @@
       </div>
     </div>
 
-    <!-- Helicopter warning -->
-    <div id="heli-warning">🚁 SPOTLIGHT INCOMING — Cash out before the beam locks on</div>
-
     <!-- Multiplier center -->
     <div id="mult-area">
       <div id="multiplier-display">1.00×</div>
       <div id="profit-display">▲ +$0.00</div>
-      <div id="ghost-badge">⚡ GHOST MODE</div>
     </div>
 
     <!-- Kash quote -->
@@ -66,38 +77,35 @@
 
     <!-- Bottom section -->
     <div id="bottom-section">
-      <div id="history-strip"></div>
+      <div id="history-row">
+        <div id="round-status"></div>
+        <div id="history-strip"></div>
+      </div>
 
       <!-- Bet area (IDLE) -->
       <div id="bet-area">
         <div id="bet-row">
           <button class="bet-adj" id="bet-half">½</button>
-          <input id="bet-input" type="number" value="10" min="0.1" max="500" step="1">
+          <button class="bet-adj" id="bet-minus">−</button>
+          <input id="bet-input" type="text" value="10.00" inputmode="decimal" readonly>
+          <button class="bet-adj" id="bet-plus">+</button>
           <button class="bet-adj" id="bet-double">×2</button>
         </div>
         <div id="quick-bets">
-          <button class="qbet" data-amount="1">$1</button>
-          <button class="qbet" data-amount="10">$10</button>
-          <button class="qbet" data-amount="50">$50</button>
-          <button class="qbet" data-amount="100">$100</button>
+          <button class="qbet" data-amount="min">MIN</button>
+          <button class="qbet" data-amount="10">+$10</button>
+          <button class="qbet" data-amount="50">+$50</button>
+          <button class="qbet" data-amount="100">+$100</button>
           <button class="qbet" data-amount="max">MAX</button>
         </div>
         <div id="auto-row">
           <span id="auto-label">Auto Cash-Out</span>
-          <span id="auto-target-label">×</span>
-          <input id="auto-target" type="number" value="2" min="1.1" max="8000" step="0.1">
-          <button id="auto-toggle"></button>
+          <span id="auto-target-val">OFF</span>
+          <input id="auto-slider" type="range" min="0" max="100" value="0" step="1">
         </div>
         <button id="place-bet-btn">PLACE BET — $<span id="btn-bet-amount">10.00</span></button>
       </div>
 
-      <!-- Cash out area (RUNNING) -->
-      <div id="cashout-area">
-        <button id="cashout-btn">
-          CASH OUT
-          <span id="cashout-amount">$10.00</span>
-        </button>
-      </div>
     </div>
   </div>
 
@@ -105,24 +113,6 @@
   <div id="countdown-overlay">
     <div id="countdown-num">5</div>
     <div id="countdown-label">ROUND STARTS IN</div>
-  </div>
-
-  <!-- Roadblock overlay -->
-  <div id="roadblock-overlay">
-    <div id="rb-banner">
-      <div id="rb-title">⚠ ROADBLOCK AHEAD</div>
-      <div id="rb-sub">Dodge left or right to survive</div>
-    </div>
-    <div id="rb-timer-wrap">
-      <div id="rb-timer-bar-bg"><div id="rb-timer-bar"></div></div>
-      <div id="rb-timer-sec">2.0s</div>
-    </div>
-    <div id="rb-buttons">
-      <button class="rb-btn" id="dodge-left">← DODGE LEFT</button>
-      <button class="rb-btn" id="dodge-right">DODGE RIGHT →</button>
-    </div>
-    <div id="rb-bonus">✓ Correct dodge: +1.5× MULTIPLIER BONUS</div>
-    <button id="rb-cashout">CASH OUT — $<span id="rb-cashout-val">0.00</span></button>
   </div>
 
   <!-- Bust screen -->

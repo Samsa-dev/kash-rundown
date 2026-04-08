@@ -82,11 +82,11 @@
 
   /* Controls panel */
   #controls {
-    flex: 1;
+    flex: 0 0 360px;
     padding: 24px 32px;
     overflow-y: auto;
-    max-width: 500px;
   }
+
   #controls h1 {
     font-size: 22px;
     font-weight: 700;
@@ -249,11 +249,11 @@
   <div class="section">
     <h2>Chase Phase</h2>
     <div class="phase-btns" id="phase-btns">
-      <button data-phase="1" class="active">1 — Clean Run</button>
-      <button data-phase="2">2 — Siren</button>
-      <button data-phase="3">3 — Chopper</button>
-      <button data-phase="4">4 — Pursuit</button>
-      <button data-phase="5">5 — Ghost</button>
+      <button data-phase="1" class="active">1 — &lt;2×</button>
+      <button data-phase="2">2 — 2×</button>
+      <button data-phase="3">3 — 5×</button>
+      <button data-phase="4">4 — 10×</button>
+      <button data-phase="5">5 — 50×</button>
     </div>
   </div>
 
@@ -267,6 +267,16 @@
     </div>
   </div>
 
+  <!-- Road geometry -->
+  <div class="section">
+    <h2>Road Geometry</h2>
+    <div class="control-row">
+      <label>Horizon width</label>
+      <input type="range" id="horizon-width" min="0" max="180" step="1" value="8">
+      <span class="val" id="horizon-val">8</span>
+    </div>
+  </div>
+
   <!-- Toggles -->
   <div class="section">
     <h2>Scene Flags</h2>
@@ -275,12 +285,32 @@
       <input type="checkbox" id="toggle-heli">
     </div>
     <div class="toggle-row">
-      <label>Ghost mode</label>
-      <input type="checkbox" id="toggle-ghost">
+      <label>Skyline fog</label>
+      <input type="checkbox" id="toggle-fog" checked>
     </div>
     <div class="toggle-row">
-      <label>Roadblock active</label>
-      <input type="checkbox" id="toggle-roadblock">
+      <label>Road fog</label>
+      <input type="checkbox" id="toggle-road-fog" checked>
+    </div>
+  </div>
+
+  <!-- Kash lane -->
+  <div class="section">
+    <h2>Kash Lane</h2>
+    <div class="control-row">
+      <label>Horizontal</label>
+      <input type="range" id="lane-slider" min="-1" max="1" step="0.01" value="0">
+      <span class="val" id="lane-val">0.00</span>
+    </div>
+    <div class="phase-btns" id="lane-btns">
+      <button data-lane="-0.5">Left</button>
+      <button data-lane="0" class="active">Center</button>
+      <button data-lane="0.5">Right</button>
+    </div>
+    <div class="control-row">
+      <label>Depth (rz)</label>
+      <input type="range" id="depth-slider" min="0" max="1" step="0.01" value="0.6">
+      <span class="val" id="depth-val">0.60</span>
     </div>
   </div>
 
@@ -288,7 +318,6 @@
   <div class="section">
     <h2>Spawn Objects</h2>
     <div class="action-btns">
-      <button class="btn-red" id="spawn-car">Car</button>
       <button class="btn-orange" id="spawn-barricade">Barricade</button>
       <button class="btn-orange" id="spawn-spikes">Spikes</button>
       <button class="btn-green" id="spawn-dumpster">Dumpster</button>
@@ -298,6 +327,7 @@
       <button class="btn-purple" id="spawn-nitro">Nitro</button>
     </div>
     <div class="action-btns" style="margin-top:6px">
+      <button class="btn-orange" id="spawn-wide">Wide (2-lane)</button>
       <button class="btn-red" id="spawn-crash">Crash Particles</button>
       <button class="btn-purple" id="clear-objects">Clear All</button>
     </div>
@@ -314,12 +344,53 @@
     </div>
   </div>
 
+  <!-- Speed Lines -->
+  <div class="section">
+    <h2>Speed Lines</h2>
+    <div class="control-row">
+      <label>Height offset</label>
+      <input type="range" id="sl-height" min="-5" max="10" step="0.05" value="0.4">
+      <span class="val" id="sl-height-val">0.40</span>
+    </div>
+    <div class="control-row">
+      <label>Inner radius</label>
+      <input type="range" id="sl-inner" min="0" max="500" step="5" value="60">
+      <span class="val" id="sl-inner-val">60</span>
+    </div>
+    <div class="control-row">
+      <label>Outer radius</label>
+      <input type="range" id="sl-outer" min="0" max="600" step="5" value="160">
+      <span class="val" id="sl-outer-val">160</span>
+    </div>
+  </div>
+
+  <!-- Simulation -->
+  <div class="section">
+    <h2>Simulation</h2>
+    <div class="control-row">
+      <label>Crash at ×</label>
+      <input type="range" id="sim-crash" min="1" max="200" step="0.5" value="10">
+      <span class="val" id="sim-crash-val">10.0×</span>
+    </div>
+    <div class="control-row">
+      <label>Speed</label>
+      <input type="range" id="sim-speed" min="0.5" max="5" step="0.5" value="1">
+      <span class="val" id="sim-speed-val">1.0×</span>
+    </div>
+    <div class="action-btns">
+      <button class="btn-green" id="sim-start">▶ Run Simulation</button>
+      <button class="btn-red" id="sim-stop">■ Stop</button>
+    </div>
+    <div style="margin-top:8px;font-family:'JetBrains Mono';font-size:11px;color:#666" id="sim-log"></div>
+  </div>
+
   <!-- Live state -->
   <div class="section">
     <h2>Live State</h2>
     <div id="state-display"></div>
   </div>
 </div>
+
 
 <script type="module" src="/src/scene-lab.ts"></script>
 </body>

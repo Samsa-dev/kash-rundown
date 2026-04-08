@@ -1,16 +1,16 @@
 import type { ChasePhase, KashMood } from './types';
 
 export function getChasePhase(multiplier: number): ChasePhase {
-  if (multiplier < 3) return 1;
-  if (multiplier < 10) return 2;
-  if (multiplier < 50) return 3;
-  if (multiplier < 500) return 4;
+  if (multiplier < 2) return 1;
+  if (multiplier < 5) return 2;
+  if (multiplier < 10) return 3;
+  if (multiplier < 50) return 4;
   return 5;
 }
 
 export function getKashMood(phase: ChasePhase, isIdle: boolean): KashMood {
   if (isIdle) return 'CHILLIN';
-  if (phase === 5) return 'BALLIN';
+  if (phase >= 4) return 'BALLIN';
   if (phase >= 2) return 'LOCKED_IN';
   return 'CHILLIN';
 }
@@ -18,14 +18,14 @@ export function getKashMood(phase: ChasePhase, isIdle: boolean): KashMood {
 export const PHASE_NAMES: Record<ChasePhase, string> = {
   1: 'CLEAN RUN',
   2: 'FIRST SIREN',
-  3: 'CHOPPER UP',
+  3: 'PURSUIT',
   4: 'FULL PURSUIT',
-  5: 'GHOST MODE',
+  5: 'FULL PURSUIT',
 };
 
 export const PHASE_BANNERS: Record<number, string> = {
-  2: '🚨 SIREN — THEY\'RE ON YOUR TAIL',
-  3: '🚁 CHOPPER UP — SPOTLIGHT ACTIVE',
-  4: '⚡ FULL PURSUIT — MAXIMUM DANGER',
-  5: '👻 GHOST MODE ACTIVATED',
+  2: '⚡ 2× — WARMING UP',
+  3: '🔥 5× — HEATING UP',
+  4: '🚨 10× — SIRENS ON',
+  5: '🚁 50× — FULL PURSUIT',
 };
