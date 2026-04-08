@@ -301,21 +301,24 @@ function localTickLoop() {
       });
     }
 
-    // Crash check — wait for crash obstacle to reach Kash
-    if (mult >= engine.state.crashPoint!) {
-      const crashObs = roadScene.obstacles.find(o => o.isCrash);
-      // If crash obstacle exists but hasn't reached Kash yet, keep ticking
-      if (crashObs && crashObs.rz < 0.35) {
-        // Freeze multiplier at crash point while obstacle approaches
-        engine.state.multiplier = engine.state.crashPoint!;
-      } else {
-        clearInterval(localTick!);
-        localTick = null;
-        const wasCashedOut = engine.state.phase === 'CASHED_OUT';
-        engine.state.phase = 'CRASHED';
-        localOnCrash(wasCashedOut);
-        return;
-      }
+    // Crash check — trigger when obstacle reaches Kash OR multiplier hits crash point
+    const crashObs = crashObstacleSpawned ? roadScene.obstacles.find(o => o.isCrash) : null;
+    const obstacleReached = crashObs && crashObs.rz >= 0.35;
+    const multReached = mult >= engine.state.crashPoint!;
+
+    if (obstacleReached || (multReached && !crashObs)) {
+      // Snap multiplier to crash point
+      engine.state.multiplier = engine.state.crashPoint!;
+      clearInterval(localTick!);
+      localTick = null;
+      const wasCashedOut = engine.state.phase === 'CASHED_OUT';
+      engine.state.phase = 'CRASHED';
+      localOnCrash(wasCashedOut);
+      return;
+    }
+    if (multReached && crashObs && crashObs.rz < 0.35) {
+      // Freeze multiplier while obstacle finishes arriving
+      engine.state.multiplier = engine.state.crashPoint!;
     }
 
     // Spawn obstacles and dodge — stop both once crash obstacle is spawned
