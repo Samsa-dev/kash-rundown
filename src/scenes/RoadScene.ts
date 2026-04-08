@@ -868,42 +868,39 @@ export class RoadScene {
     // Police siren glow behind Kash — strong red/blue alternating lights
     if (this.serverRoundRunning) {
       const t = (Math.sin(Date.now() / 150) + 1) / 2;
-      const intensity = Math.min(1, 0.3 + phase * 0.15);
+      const intensity = Math.min(1, 0.5 + phase * 0.15);
 
-      // Strong focused glow circles at bottom (like headlights behind Kash)
       const cx = W / 2;
-      const cy = H - 30;
+      const cy = H * 0.65;
 
       // Left police light — red
-      const leftX = cx - 60;
-      for (let r = 120; r > 0; r -= 20) {
+      const leftX = cx - 80;
+      for (let r = 200; r > 0; r -= 25) {
         this.effectsBack.circle(leftX, cy, r)
-          .fill({ color: 0xEF4444, alpha: t * intensity * 0.04 });
+          .fill({ color: 0xEF4444, alpha: t * intensity * 0.06 });
       }
-      // Bright center
-      this.effectsBack.circle(leftX, cy, 25)
-        .fill({ color: 0xEF4444, alpha: t * intensity * 0.3 });
-      this.effectsBack.circle(leftX, cy, 8)
-        .fill({ color: 0xFF6666, alpha: t * intensity * 0.6 });
+      this.effectsBack.circle(leftX, cy, 40)
+        .fill({ color: 0xEF4444, alpha: t * intensity * 0.5 });
+      this.effectsBack.circle(leftX, cy, 15)
+        .fill({ color: 0xFF8888, alpha: t * intensity * 0.8 });
 
       // Right police light — blue
-      const rightX = cx + 60;
-      for (let r = 120; r > 0; r -= 20) {
+      const rightX = cx + 80;
+      for (let r = 200; r > 0; r -= 25) {
         this.effectsBack.circle(rightX, cy, r)
-          .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.04 });
+          .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.06 });
       }
-      // Bright center
-      this.effectsBack.circle(rightX, cy, 25)
-        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.3 });
-      this.effectsBack.circle(rightX, cy, 8)
-        .fill({ color: 0x6699FF, alpha: (1 - t) * intensity * 0.6 });
+      this.effectsBack.circle(rightX, cy, 40)
+        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.5 });
+      this.effectsBack.circle(rightX, cy, 15)
+        .fill({ color: 0x88BBFF, alpha: (1 - t) * intensity * 0.8 });
 
-      // Wide glow wash at very bottom
-      const washH = 80;
-      this.effectsBack.rect(0, H - washH, W / 2, washH)
-        .fill({ color: 0xEF4444, alpha: t * intensity * 0.08 });
-      this.effectsBack.rect(W / 2, H - washH, W / 2, washH)
-        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.08 });
+      // Full width glow wash
+      const washH = 250;
+      this.effectsBack.rect(0, cy - washH / 2, W / 2, washH)
+        .fill({ color: 0xEF4444, alpha: t * intensity * 0.15 });
+      this.effectsBack.rect(W / 2, cy - washH / 2, W / 2, washH)
+        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.15 });
     }
   }
 
