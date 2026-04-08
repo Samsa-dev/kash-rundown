@@ -865,19 +865,45 @@ export class RoadScene {
       this.effectsBack.rect(0, 0, W, H).fill({ color, alpha });
     }
 
-    // Siren glow bars at bottom — red left, blue right, alternating
+    // Police siren glow behind Kash — strong red/blue alternating lights
     if (this.serverRoundRunning) {
-      const glowH = 120;
-      const glowY = H - glowH;
-      const glowAlpha = 0.08 + Math.min(0.12, phase * 0.03);
-      const t = (Math.sin(Date.now() / 150) + 1) / 2; // 0-1 smooth oscillation
+      const t = (Math.sin(Date.now() / 150) + 1) / 2;
+      const intensity = Math.min(1, 0.3 + phase * 0.15);
 
-      // Left glow — red
-      this.effectsBack.rect(0, glowY, W / 2, glowH)
-        .fill({ color: 0xEF4444, alpha: glowAlpha * t });
-      // Right glow — blue
-      this.effectsBack.rect(W / 2, glowY, W / 2, glowH)
-        .fill({ color: 0x2563EB, alpha: glowAlpha * (1 - t) });
+      // Strong focused glow circles at bottom (like headlights behind Kash)
+      const cx = W / 2;
+      const cy = H - 30;
+
+      // Left police light — red
+      const leftX = cx - 60;
+      for (let r = 120; r > 0; r -= 20) {
+        this.effectsBack.circle(leftX, cy, r)
+          .fill({ color: 0xEF4444, alpha: t * intensity * 0.04 });
+      }
+      // Bright center
+      this.effectsBack.circle(leftX, cy, 25)
+        .fill({ color: 0xEF4444, alpha: t * intensity * 0.3 });
+      this.effectsBack.circle(leftX, cy, 8)
+        .fill({ color: 0xFF6666, alpha: t * intensity * 0.6 });
+
+      // Right police light — blue
+      const rightX = cx + 60;
+      for (let r = 120; r > 0; r -= 20) {
+        this.effectsBack.circle(rightX, cy, r)
+          .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.04 });
+      }
+      // Bright center
+      this.effectsBack.circle(rightX, cy, 25)
+        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.3 });
+      this.effectsBack.circle(rightX, cy, 8)
+        .fill({ color: 0x6699FF, alpha: (1 - t) * intensity * 0.6 });
+
+      // Wide glow wash at very bottom
+      const washH = 80;
+      this.effectsBack.rect(0, H - washH, W / 2, washH)
+        .fill({ color: 0xEF4444, alpha: t * intensity * 0.08 });
+      this.effectsBack.rect(W / 2, H - washH, W / 2, washH)
+        .fill({ color: 0x2563EB, alpha: (1 - t) * intensity * 0.08 });
     }
   }
 
