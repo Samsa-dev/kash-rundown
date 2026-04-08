@@ -35,28 +35,27 @@
     border-radius: 2px; transition: width 0.3s;
   }
   #intro-skip {
-    position: absolute; top: 20px; right: 20px;
-    font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600;
-    letter-spacing: 2px; color: rgba(255,255,255,0.5);
-    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 6px; padding: 8px 16px;
+    position: absolute; top: 16px; right: 16px;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600;
+    letter-spacing: 2px; color: rgba(255,255,255,0.4);
+    background: none; border: none; padding: 6px 10px;
     cursor: pointer; opacity: 0; transition: opacity 0.5s;
     z-index: 10;
   }
   #intro-skip.visible { opacity: 1; }
-  #intro-skip:hover { color: #EAB308; border-color: rgba(234,179,8,0.4); background: rgba(234,179,8,0.1); }
+  #intro-skip:hover { color: rgba(255,255,255,0.7); }
   #intro-unmute {
-    position: absolute; bottom: 30px; left: 50%;
-    transform: translateX(-50%);
-    font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600;
-    letter-spacing: 2px; color: rgba(255,255,255,0.6);
-    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 6px; padding: 8px 20px;
-    cursor: pointer; opacity: 0; transition: opacity 0.5s;
-    display: none;
+    position: absolute; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    cursor: pointer; z-index: 9;
+    background: rgba(0,0,0,0.3);
+    opacity: 0; transition: opacity 0.5s;
   }
-  #intro-unmute.visible { opacity: 1; display: block; }
-  #intro-unmute:hover { color: #EAB308; border-color: rgba(234,179,8,0.4); background: rgba(234,179,8,0.1); }
+  #intro-unmute.visible { display: flex; opacity: 1; }
+  #intro-unmute span {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 700;
+    letter-spacing: 3px; color: #EAB308; text-shadow: 0 0 20px rgba(234,179,8,0.5);
+  }
   #wrap { visibility: hidden; }
 </style>
 </head>
@@ -72,8 +71,8 @@
     <div id="intro-loading-text">Loading...</div>
   </div>
   <div id="intro-skip">Skip intro &gt;&gt;</div>
-  <div id="intro-unmute"></div>
-  <script>document.getElementById('intro-unmute').textContent = 'ontouchstart' in window ? '🔊 Tap to unmute' : '🔊 Click to unmute';</script>
+  <div id="intro-unmute"><span></span></div>
+  <script>document.querySelector('#intro-unmute span').textContent = 'ontouchstart' in window ? '🔊 TAP TO UNMUTE' : '🔊 CLICK TO UNMUTE';</script>
 </div>
 
 <div id="wrap">
