@@ -292,7 +292,7 @@ function localTickLoop() {
     }
 
     // Pre-spawn crash obstacle from horizon when approaching crash point
-    const crashSpawnAt = engine.state.chasePhase <= 2 ? 0.82 : 0.88;
+    const crashSpawnAt = 0.95;
     if (!crashObstacleSpawned && engine.state.crashPoint! > 1.00 && mult >= engine.state.crashPoint! * crashSpawnAt) {
       crashObstacleSpawned = true;
       roadScene.obstacles.push({

@@ -907,7 +907,11 @@ export class RoadScene {
     this.obstacles.sort((a, b) => a.rz - b.rz);
 
     for (const o of this.obstacles) {
-      if (state.phase === 'RUNNING' || this.serverRoundRunning) o.rz += speed * (0.2 + o.rz * 1.5);
+      if (state.phase === 'RUNNING' || this.serverRoundRunning) {
+        // Crash obstacle uses its own fixed fast speed
+        const s = o.isCrash ? 0.03 : speed;
+        o.rz += s * (0.2 + o.rz * 1.5);
+      }
       // Crash obstacle stops at Kash's position
       if (o.isCrash && o.rz >= 0.38) o.rz = 0.38;
       const { x, y, scale } = roadToScreen(o.rx, o.rz);
