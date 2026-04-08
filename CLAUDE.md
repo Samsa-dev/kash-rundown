@@ -6,88 +6,126 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Kash Rundown is a burst/crash casino game prototype — part of the Kash Games universe by Samsa Productions SAS. The player bets and cashes out before a crash. The game is themed as a police chase through a cyberpunk London, with a gorilla character named Kash on a motorcycle. **The player ONLY bets and cashes out** — all visual elements (obstacles, lane changes, Kash movement) are simulation driven by the server.
 
-The full game design spec is in `Kash_Rundown_Game_Spec.docx.pdf`. The narrative/business bible is `KASH_PROJECT_BIBLE.md`.
-
 ## Commands
 
 ```bash
 npm run dev       # Vite dev server on localhost:3000 (frontend)
 npm run server    # Game server on localhost:3001 (backend, WebSocket)
-npm run build     # TypeScript check + production build → dist/
+npm run build     # Production build → dist/
 ```
 
-Both servers must run simultaneously for the game to work.
+Both servers must run simultaneously for multiplayer. Without server, game auto-falls back to offline/local mode.
+
+## Deployment
+
+- **Vercel** — frontend (auto-deploys from main branch)
+- **Railway** — WebSocket backend (auto-deploys from main branch)
+- **Offline mode** — if WebSocket fails to connect in 3s, game runs locally with GameEngine
+- **Environment variable**: `VITE_WS_URL` on Vercel points to Railway WSS URL
+- Assets in `public/assets/` — served at `/assets/` in both dev and production
 
 ## Architecture
 
 ### Frontend (Vite + PixiJS)
 
-Two HTML entry points in `vite.config.ts`:
-- `index.html` → `src/main.ts` — the main game
-- `scene-lab.html` → `src/scene-lab.ts` — visual testing sandbox
+- `index.html` → `src/main.ts` — main game
+- `scene-lab.html` → `src/scene-lab.ts` — visual testing sandbox with simulation
 
-**`src/main.ts`** — Connects to backend via WebSocket, handles all UI state. Single unified button with 4 states: PLACE BET → BET PLACED (cancelable during countdown) → CASH OUT → QUEUED (for next round).
+**`src/main.ts`** — Connects to backend via WebSocket. Falls back to local GameEngine if offline. Single unified button with states: PLACE BET → BET PLACED (cancelable) → CASH OUT → QUEUED.
 
-**`src/network/GameClient.ts`** — WebSocket client wrapper. Methods: `connect()`, `placeBet()`, `cashOut()`, `cancelBet()`, `on(type, handler)`.
+**`src/network/GameClient.ts`** — WebSocket client with auto-reconnect and offline detection.
 
-**`src/game/GameEngine.ts`** — Local state container. No longer runs tick loop — receives state from server. Kept for balance/history tracking.
+**`src/scenes/RoadScene.ts`** — PixiJS rendering. Video background (`road-bg.webm/.mp4`), Kash rider video/image, obstacle sprites, rain, siren glows, speed lines.
 
-**`src/scenes/RoadScene.ts`** — Large file. All PixiJS rendering: road with perspective vanishing point, buildings, obstacles, rain, lightning, street lamps, Kash sprite. Key public properties: `serverRoundRunning`, `riderLane`, `riderDepth`, `skylineFog`, `roadFog`, `speedLineHeight/Inner/Outer`.
-
-**`src/scenes/constants.ts`** — Road geometry. `roadToScreen(rx, rz)` maps road-space to screen coords. Horizon width is 8px (near vanishing point). `setHorizonWidth()` adjusts dynamically.
-
-**`src/kash/DialogueSystem.ts`** — 80+ dialogue lines by trigger. `src/kash/MoodState.ts` — mood colors.
-
-**`src/audio/AudioManager.ts`** — Procedural Web Audio API. `toggleMute()`, `isMuted()`.
+**`src/scenes/constants.ts`** — Road perspective math. `roadToScreen(rx, rz)` maps road-space to screen. Horizon width = 0 (vanishing point).
 
 ### Backend (Node.js + TypeScript)
 
 ```
 server/
-  index.ts              — Express + WebSocket server (port 3001)
-  types.ts              — Shared message types (ServerMessage, ClientMessage)
+  index.ts              — Express + WebSocket (PORT env, CORS, 0.0.0.0)
   game/
-    Round.ts            — Round lifecycle, obstacle spawning, Kash auto-movement
-    RNG.ts              — Provably fair SHA-256 hash chain (10k rounds per chain)
-    Multiplier.ts       — Exponential growth curve (same as client)
+    Round.ts            — Round lifecycle, obstacle spawning, Kash dodge logic, crash sequence
+    RNG.ts              — Provably fair SHA-256 hash chain
+    Multiplier.ts       — Exponential growth curve
   ws/
-    GameRoom.ts         — Multiplayer room, broadcast, bet/cashout/cancel handling
-    PlayerSession.ts    — Per-player state (balance, bet, cashout)
+    GameRoom.ts         — Multiplayer room, bet/cashout/cancel handling
+    PlayerSession.ts    — Per-player state
 ```
 
-**Round flow:** Server generates crash point → 5s countdown (bets open) → ticks every 80ms → crash → 3s wait → next round. All players see the same multiplier.
+### Key Game Logic (Round.ts)
 
-**WebSocket messages:**
-- Client → Server: `placeBet`, `cashOut`, `cancelBet`, `ping`
-- Server → Client: `round:waiting`, `round:countdown`, `round:tick`, `round:crash`, `bet:confirmed`, `bet:cancelled`, `bet:rejected`, `cashOut:confirmed`, `obstacle:spawn`, `kash:move`, `players`, `welcome`, `history`
+**Obstacle spawning:**
+- Normal obstacles: barricade, spikes, dumpster, cones, manhole (1 lane)
+- Wide obstacles: police_alt (2 lanes, phase 3+, 20% chance)
+- Obstacle lanes: -0.667, 0, 0.667
+- Multi-obstacle chance scales with phase
+- No obstacles spawn within 10% of crash point
 
-### Chase Phases
+**Kash dodge:**
+- Kash lanes: -0.8, -0.05, 0.7
+- Only moves when obstacle is in danger zone (0.4 radius normal, 0.7 for wide)
+- Phase 1-2: dodge with 150-250ms delay for drama
+- Phase 3+: instant dodge
+- Pending dodge cancelled on crash
 
-| Phase | Multiplier | Visual |
-|-------|-----------|--------|
-| 1 | <2× | Clean run, no effects |
-| 2 | 2×+ | Rain starts, siren flash, green glow on Kash |
-| 3 | 5×+ | Heavier rain, gold glow |
-| 4 | 10×+ | Orange glow, more obstacles |
-| 5 | 50×+ | Red glow, helicopter, max intensity |
+**Crash sequence:**
+- Obstacle spawns at rz=0 (horizon) in Kash's exact lane
+- Delay before crash event: [1000, 600, 380, 300, 200]ms per phase
+- Crash point 1.00 = "ENGINE STALLED" (no obstacle)
 
-### Kash Sprite
-- Loaded from `/src/assets/kash-en-moto.webp` (gorilla on motorcycle, back view)
-- Positioned via `roadToScreen()` at `riderDepth` (default 0.6)
-- Lane change animation with tilt + tire sparks
-- Darkens in rain, tinted by siren colors
-- Glow border color changes per phase
+### Video/Image Assets
 
-### Obstacles
-- Server-driven: `obstacle:spawn` messages with type, lane, and lane count
-- 1-lane types: barricade, spikes, dumpster, cones, flipped_car, electric_puddle
-- 2-lane types: wide barricade, wide spikes, flipped truck, wide electric puddle
-- Obstacle lanes: -0.667, 0, 0.667 (1-lane) or -0.333, 0.333 (2-lane)
-- Kash lanes: -0.5, 0, 0.5 (server decides movement)
+**Current state — needs work on Mac:**
+- `kash-rider.webm` — VP9 with alpha channel (works Chrome/Firefox, NOT Safari)
+- `kash-rider.mp4` — H.264 no alpha (fallback, has black background)
+- `kash-en-moto.webp` — static image (Safari fallback, works everywhere)
+- `road-bg.webm` / `road-bg.mp4` — background video
 
-### Key Design Decisions
-- Portrait-first 390x844 (iPhone 14 viewport)
-- Color palette: deep navy background, bribe gold (#EAB308) for UI accents, green for bet button
-- Multiplier curve: `exp(0.000055 * elapsed_ms)` — same on client and server
-- House edge: 4%, instant crash rate: 1.2%
-- Provably fair: SHA-256 hash chain, revealed after each round
+**TODO on Mac (has VideoToolbox for HEVC):**
+1. Convert `src/assets/Kash_Atrás Loop_Baja.mov` (has ARGB alpha!) to HEVC with alpha:
+   ```bash
+   ffmpeg -i "Kash_Atrás Loop_Baja.mov" -c:v hevc_videotoolbox -allow_sw 1 -alpha_quality 0.75 -tag:v hvc1 -b:v 1M -an public/assets/kash-rider-safari.mov
+   ```
+2. Update `src/scenes/RoadScene.ts` `loadRiderSprite()` to:
+   - Safari: use `kash-rider-safari.mov` (HEVC alpha) instead of static image
+   - Chrome/Firefox: keep `kash-rider.webm` (VP9 alpha) — already working
+3. Test on Safari that the alpha transparency works with HEVC
+
+**The original MOV has `pix_fmt: argb` (QuickTime Animation codec) — confirmed alpha channel exists.**
+
+### Chase Phases & Timing
+
+| Phase | Multiplier | Crash delay | Obstacles | Video speed |
+|-------|-----------|-------------|-----------|-------------|
+| 1 | <2× | 1000ms | Every 1.2s | 1.0x |
+| 2 | 2×+ | 600ms | Every 0.8s | 1.2x |
+| 3 | 5×+ | 380ms | Every 0.5s | 1.5x |
+| 4 | 10×+ | 300ms | Every 0.35s | 2.0x |
+| 5 | 50×+ | 200ms | Every 0.25s | 2.5x |
+
+### Audio
+
+- Engine: procedural sawtooth oscillator, pitch scales with multiplier
+- Siren: sine wave + LFO sweep (1.5Hz, ±250Hz) — plays during round, stops on crash
+- Crash SFX: descending sawtooth sweep
+- Cashout SFX: ascending arpeggio (does NOT stop engine/siren)
+- All audio stops on crash via `Audio.stopAll()`
+
+### Visual Effects
+
+- Siren glow: Canvas2D radial gradients, red left / blue right, alternating at 150ms
+- Position: cy = H * 0.85, radius = 800
+- Rain: PixiJS Graphics, phase 2+
+- Kash tint: darkens in rain, red/blue siren tint alternating
+- Glow filter border on Kash per phase
+- Speed lines around Kash (height=5.5, inner=100, outer=200)
+- Background video playback rate scales with phase
+
+### Scene Lab
+
+Full simulation environment at `/scene-lab.html`:
+- Crash point input (text), speed slider
+- All visual controls (fog, video, sprites, scale, position)
+- Same obstacle/dodge/crash logic as server
+- Phase buttons, Kash lane controls

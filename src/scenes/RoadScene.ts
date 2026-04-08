@@ -872,24 +872,24 @@ export class RoadScene {
     const ctx = this.bgCtx;
     const t = (Math.sin(Date.now() / 150) + 1) / 2;
     const intensity = Math.min(1, 0.5 + phase * 0.15);
-    const cy = H * 0.72;
-    const radius = 300;
+    const cy = H * 0.85;
+    const radius = 800;
 
     ctx.save();
     // Red glow — left
-    const redGrad = ctx.createRadialGradient(W / 2 - 90, cy, 0, W / 2 - 90, cy, radius);
-    redGrad.addColorStop(0, `rgba(239,68,68,${(t * intensity * 0.9).toFixed(2)})`);
-    redGrad.addColorStop(0.2, `rgba(239,68,68,${(t * intensity * 0.4).toFixed(2)})`);
-    redGrad.addColorStop(0.5, `rgba(239,68,68,${(t * intensity * 0.1).toFixed(2)})`);
+    const redGrad = ctx.createRadialGradient(W / 2 - 100, cy, 0, W / 2 - 100, cy, radius);
+    redGrad.addColorStop(0, `rgba(255,50,50,${(t * intensity).toFixed(2)})`);
+    redGrad.addColorStop(0.15, `rgba(239,68,68,${(t * intensity * 0.6).toFixed(2)})`);
+    redGrad.addColorStop(0.4, `rgba(239,68,68,${(t * intensity * 0.2).toFixed(2)})`);
     redGrad.addColorStop(1, 'rgba(239,68,68,0)');
     ctx.fillStyle = redGrad;
     ctx.fillRect(0, cy - radius, W, radius * 2);
 
     // Blue glow — right
-    const blueGrad = ctx.createRadialGradient(W / 2 + 90, cy, 0, W / 2 + 90, cy, radius);
-    blueGrad.addColorStop(0, `rgba(37,99,235,${((1 - t) * intensity * 0.9).toFixed(2)})`);
-    blueGrad.addColorStop(0.2, `rgba(37,99,235,${((1 - t) * intensity * 0.4).toFixed(2)})`);
-    blueGrad.addColorStop(0.5, `rgba(37,99,235,${((1 - t) * intensity * 0.1).toFixed(2)})`);
+    const blueGrad = ctx.createRadialGradient(W / 2 + 100, cy, 0, W / 2 + 100, cy, radius);
+    blueGrad.addColorStop(0, `rgba(50,100,255,${((1 - t) * intensity).toFixed(2)})`);
+    blueGrad.addColorStop(0.15, `rgba(37,99,235,${((1 - t) * intensity * 0.6).toFixed(2)})`);
+    blueGrad.addColorStop(0.4, `rgba(37,99,235,${((1 - t) * intensity * 0.2).toFixed(2)})`);
     blueGrad.addColorStop(1, 'rgba(37,99,235,0)');
     ctx.fillStyle = blueGrad;
     ctx.fillRect(0, cy - radius, W, radius * 2);
