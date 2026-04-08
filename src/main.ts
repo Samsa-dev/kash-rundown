@@ -261,9 +261,11 @@ function wireServerEvents() {
     roadScene.clearGameObjects();
     Audio.playCrash();
     flashScreen('#EF4444', 600);
+    showCrashDisplay(crashPoint);
 
-    // If player was betting and didn't cash out
+    // Always add crash to history strip
     if (playerInRound && engine.state.phase === 'RUNNING') {
+      // Player lost
       engine.state.crashPoint = crashPoint;
       engine.state.phase = 'CRASHED';
       playerInRound = false;
@@ -271,20 +273,17 @@ function wireServerEvents() {
       engine.state.sessionProfit -= engine.state.bet;
       engine.state.sessionRounds++;
       engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: engine.state.bet });
-      if (engine.state.history.length > 20) engine.state.history.pop();
-
-      setTimeout(() => {
-        $('bust-screen').classList.add('visible');
-        $('bust-mult').textContent = crashPoint.toFixed(2) + '×';
-        $('bust-crash-val').textContent = crashPoint.toFixed(2) + '×';
-        $('bust-bet-val').textContent = '$' + engine.state.bet.toFixed(2);
-        $('bust-result-val').textContent = '-$' + engine.state.bet.toFixed(2);
-        $('bust-quote').textContent = '"' + dialogue.getBustQuote() + '"';
-        updateBalanceDisplay();
-        updateHistory();
-        updateStats();
-      }, 800);
+    } else {
+      // Spectating — still show in history
+      engine.state.history.unshift({ mult: crashPoint, result: 'LOST', bet: 0 });
     }
+    if (engine.state.history.length > 20) engine.state.history.pop();
+
+    setTimeout(() => {
+      updateBalanceDisplay();
+      updateHistory();
+      updateStats();
+    }, 800);
 
     // Re-enable controls for next round
     setMainButton('bet');
@@ -352,14 +351,14 @@ function doCashOut(): void {
 function setMainButton(state: BtnState, amount?: number): void {
   const btn = $('place-bet-btn');
   btnState = state;
-  btn.classList.remove('queued', 'cashout-mode', 'placed-mode');
+  btn.classList.remove('queued', 'cashout-mode', 'placed-mode', 'bet-next-mode');
   btn.style.opacity = '';
   btn.style.pointerEvents = '';
 
   switch (state) {
     case 'bet':
       if (serverRunning) {
-        btn.classList.add('queued');
+        btn.classList.add('bet-next-mode');
         const val = parseFloat(($('bet-input') as HTMLInputElement).value) || 10;
         btn.innerHTML = 'BET NEXT ROUND — $<span id="btn-bet-amount">' + val.toFixed(2) + '</span>';
       } else {
@@ -533,6 +532,16 @@ function showFloatingText(text: string, color: string, x: number, y: number): vo
   el.style.cssText = `color:${color};left:${x - 100}px;top:${y}px;width:200px;text-align:center`;
   $('wrap').appendChild(el);
   el.addEventListener('animationend', () => el.remove());
+}
+
+function showCrashDisplay(_crashPoint: number): void {
+  const el = $('crash-display');
+  el.classList.remove('visible');
+  void el.offsetWidth; // force reflow to restart animation
+  el.classList.add('visible');
+  $('wrap').classList.add('shake');
+  setTimeout(() => $('wrap').classList.remove('shake'), 400);
+  setTimeout(() => el.classList.remove('visible'), 2200);
 }
 
 function flashScreen(color: string, duration: number): void {

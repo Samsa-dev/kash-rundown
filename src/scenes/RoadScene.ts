@@ -430,17 +430,20 @@ export class RoadScene {
       if (brightness > 0.6 && i % 3 === 0) {
         const nc = neonPalette[i % neonPalette.length];
         ctx.save();
-        ctx.shadowColor = nc;
-        ctx.shadowBlur = 14 * brightness;
+        // Soft glow halo (wider, transparent) instead of shadowBlur
+        ctx.globalAlpha = 0.25 * brightness;
         ctx.fillStyle = nc;
+        ctx.fillRect(x - bw / 2 - 1, by + 3, 6, Math.min(bh * 0.4, 25) + 4);
+        // Bright core
         ctx.globalAlpha = 0.8 * brightness;
         ctx.fillRect(x - bw / 2 + 1, by + 5, 2, Math.min(bh * 0.4, 25));
-        // Horizontal neon bar
         if (i % 2 === 0) {
+          ctx.globalAlpha = 0.2 * brightness;
+          ctx.fillRect(x - bw / 2, by + bh * 0.3 - 2, bw, 6);
+          ctx.globalAlpha = 0.8 * brightness;
           ctx.fillRect(x - bw / 2 + 2, by + bh * 0.3, bw - 4, 2);
         }
         ctx.globalAlpha = 1;
-        ctx.shadowBlur = 0;
         ctx.restore();
       }
 
@@ -531,8 +534,12 @@ export class RoadScene {
         if (f.hasNeon) {
           const sign = NEON_SIGNS[f.neonIdx % NEON_SIGNS.length];
           ctx.save();
-          ctx.shadowColor = sign.color;
-          ctx.shadowBlur = 12;
+          // Glow halo behind text
+          ctx.globalAlpha = 0.2;
+          ctx.fillStyle = sign.color;
+          ctx.fillRect(startX + 2, y + 6, colW - 4, 18);
+          // Text
+          ctx.globalAlpha = 1;
           ctx.fillStyle = sign.color;
           ctx.font = '700 9px sans-serif';
           ctx.textAlign = 'center';
@@ -540,7 +547,6 @@ export class RoadScene {
           // Glow bar under text
           ctx.fillStyle = sign.color + '66';
           ctx.fillRect(startX + 4, y + 20, colW - 8, 2);
-          ctx.shadowBlur = 0;
           ctx.restore();
         }
 
@@ -650,13 +656,16 @@ export class RoadScene {
 
     // Curb lines (bright edge between road and sidewalk)
     ctx.save();
-    ctx.shadowColor = '#00FF66';
-    ctx.shadowBlur = 8;
+    // Soft glow line
+    ctx.strokeStyle = 'rgba(0,255,100,0.15)';
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(ROAD_L_HOR, HORIZON_Y); ctx.lineTo(-200, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ROAD_R_HOR, HORIZON_Y); ctx.lineTo(W + 200, H); ctx.stroke();
+    // Bright core
     ctx.strokeStyle = 'rgba(0,255,100,0.5)';
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(ROAD_L_HOR, HORIZON_Y); ctx.lineTo(-200, H); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(ROAD_R_HOR, HORIZON_Y); ctx.lineTo(W + 200, H); ctx.stroke();
-    ctx.shadowBlur = 0;
     ctx.restore();
 
     this.roadOffset = (this.roadOffset + (2 + state.chasePhase * 1.5)) % 60;
@@ -695,8 +704,6 @@ export class RoadScene {
       const botX = -200 + (W + 400) * frac;
 
       ctx.save();
-      ctx.shadowColor = '#00FF66';
-      ctx.shadowBlur = 6;
       ctx.strokeStyle = 'rgba(0,255,100,0.35)';
 
       let t = -(cycleT - this.laneDashOffset % cycleT);

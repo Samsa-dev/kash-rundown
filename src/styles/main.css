@@ -183,7 +183,7 @@ body {
 #kash-quote {
   display: none;
   position: absolute;
-  top: 220px;
+  top: 230px;
   left: 16px; right: 16px;
   background: rgba(10,10,28,0.85);
   border: 1px solid rgba(255,255,255,0.1);
@@ -410,6 +410,11 @@ body {
   from { box-shadow: 0 4px 28px rgba(234,130,10,0.4), 0 0 0 2px rgba(255,180,80,0.2) inset; }
   to { box-shadow: 0 4px 36px rgba(234,130,10,0.8), 0 0 0 2px rgba(255,180,80,0.4) inset; }
 }
+#place-bet-btn.bet-next-mode {
+  background: linear-gradient(135deg, #15803d, #16A34A, #22c55e);
+  box-shadow: 0 4px 28px rgba(22,163,74,0.5), 0 0 0 2px rgba(34,197,94,0.2) inset;
+  animation: placed-pulse 1.5s ease-in-out infinite alternate;
+}
 #place-bet-btn.queued {
   background: linear-gradient(135deg, #ca8a04, #EAB308, #facc15);
   box-shadow: 0 4px 28px rgba(234,179,8,0.5), 0 0 0 2px rgba(234,179,8,0.2) inset;
@@ -571,6 +576,48 @@ body {
 }
 #heli-warning.visible { display: block; }
 
+/* Crash display */
+#crash-display {
+  display: none;
+  position: absolute;
+  top: 35%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 60;
+  pointer-events: none;
+  font-family: 'Barlow Condensed';
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #EF4444;
+  text-shadow: 0 0 40px rgba(239,68,68,0.7), 0 2px 8px rgba(0,0,0,0.5);
+  text-transform: uppercase;
+  animation: crash-pop 2.2s ease-out forwards;
+}
+#crash-display.visible { display: block; }
+@keyframes crash-pop {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  10%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+  20%  { transform: translate(-50%, -50%) scale(1); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+}
+
+/* Screen shake */
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-4px, 2px); }
+  20% { transform: translate(4px, -2px); }
+  30% { transform: translate(-3px, -3px); }
+  40% { transform: translate(3px, 3px); }
+  50% { transform: translate(-2px, 1px); }
+  60% { transform: translate(2px, -1px); }
+  70% { transform: translate(-1px, 2px); }
+  80% { transform: translate(1px, -1px); }
+}
+#wrap.shake { animation: shake 0.4s ease-out; }
+
 /* Bust screen */
 #bust-screen {
   position: absolute;
@@ -685,7 +732,7 @@ body {
 /* Phase event banner */
 #phase-event-banner {
   position: absolute;
-  top: 210px; left: 12px; right: 12px;
+  top: 230px; left: 12px; right: 12px;
   display: none;
   align-items: center;
   justify-content: center;
