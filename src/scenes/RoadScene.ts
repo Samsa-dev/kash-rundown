@@ -1322,32 +1322,47 @@ export class RoadScene {
   async loadRiderSprite(): Promise<void> {
     const { Assets, VideoSource } = await import('pixi.js');
 
-    // Load video version — WebM for Chrome/Firefox, MP4 for Safari
-    const video = document.createElement('video');
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-    video.autoplay = true;
-    const webm = video.canPlayType('video/webm; codecs="vp9"');
-    video.src = webm ? '/assets/kash-rider.webm' : '/assets/kash-rider.mp4';
-    await video.play();
-    const videoSource = new VideoSource({ resource: video, autoPlay: true });
-    this.riderVideoSprite = new Sprite(new Texture({ source: videoSource }));
-    this.riderVideoSprite.anchor.set(0.5, 0.5);
-    this.riderVideoSprite.blendMode = 'screen';
+    // Detect Safari
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
-    // Load image version
+    // Load image version (always needed as fallback)
     const imgTexture = await Assets.load({
       src: '/assets/kash-en-moto.webp',
       data: { scaleMode: 'linear', autoGenerateMipmaps: true },
     });
     this.riderImageSprite = new Sprite(imgTexture);
     this.riderImageSprite.anchor.set(0.5, 1);
-    this.riderImageSprite.visible = false;
 
-    this.riderContainer.addChild(this.riderVideoSprite);
-    this.riderContainer.addChild(this.riderImageSprite);
-    this.riderSprite = this.riderVideoSprite;
+    if (!isSafari) {
+      // Load video version for Chrome/Firefox
+      try {
+        const video = document.createElement('video');
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.autoplay = true;
+        const webm = video.canPlayType('video/webm; codecs="vp9"');
+        video.src = webm ? '/assets/kash-rider.webm' : '/assets/kash-rider.mp4';
+        await video.play();
+        const videoSource = new VideoSource({ resource: video, autoPlay: true });
+        this.riderVideoSprite = new Sprite(new Texture({ source: videoSource }));
+        this.riderVideoSprite.anchor.set(0.5, 0.5);
+        this.riderVideoSprite.blendMode = 'screen';
+
+        this.riderImageSprite.visible = false;
+        this.riderContainer.addChild(this.riderVideoSprite);
+        this.riderContainer.addChild(this.riderImageSprite);
+        this.riderSprite = this.riderVideoSprite;
+      } catch {
+        // Video failed — use image
+        this.riderContainer.addChild(this.riderImageSprite);
+        this.riderSprite = this.riderImageSprite;
+      }
+    } else {
+      // Safari — use image only
+      this.riderContainer.addChild(this.riderImageSprite);
+      this.riderSprite = this.riderImageSprite;
+    }
   }
 
   setRiderVideo(useVideo: boolean): void {
