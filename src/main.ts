@@ -105,9 +105,7 @@ async function init() {
 
   const unmuteBtn = document.getElementById('intro-unmute')!;
 
-  // Mute game audio during intro
-  Audio.initAudio();
-  Audio.toggleMute(); // mute
+  // Keep game audio uninitialized during intro — no sounds leak
 
   const showReady = () => {
     loadingWrap.classList.remove('visible');
@@ -145,8 +143,8 @@ async function init() {
     if (gameShown) return;
     gameShown = true;
     introVideo.pause();
-    // Unmute game audio
-    if (Audio.isMuted()) Audio.toggleMute();
+    // Init game audio now (user gesture context from skip/tap)
+    Audio.initAudio();
     document.getElementById('wrap')!.style.visibility = 'visible';
     introScreen.classList.add('hidden');
     setTimeout(() => introScreen.remove(), 1000);
