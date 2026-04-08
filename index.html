@@ -12,6 +12,10 @@
     background: #0F0F1E;
     display: flex; align-items: center; justify-content: center;
   }
+  #intro-video-wrap {
+    position: relative;
+    max-width: 100%; max-height: 100%;
+  }
   #intro-screen.hidden { opacity: 0; pointer-events: none; transition: opacity 0.8s; }
   #intro-video { max-width: 100%; max-height: 100%; object-fit: contain; }
   #intro-loading {
@@ -35,15 +39,16 @@
     border-radius: 2px; transition: width 0.3s;
   }
   #intro-skip {
-    position: absolute; top: 16px; right: 16px;
-    font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600;
-    letter-spacing: 2px; color: rgba(255,255,255,0.4);
-    background: none; border: none; padding: 6px 10px;
+    position: absolute; top: 20px; right: 20px;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600;
+    letter-spacing: 2px; color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px; padding: 8px 16px;
     cursor: pointer; opacity: 0; transition: opacity 0.5s;
     z-index: 10;
   }
   #intro-skip.visible { opacity: 1; }
-  #intro-skip:hover { color: rgba(255,255,255,0.7); }
+  #intro-skip:hover { color: #EAB308; border-color: rgba(234,179,8,0.4); background: rgba(234,179,8,0.1); }
   #intro-unmute {
     position: absolute; inset: 0;
     display: none; align-items: center; justify-content: center;
@@ -62,15 +67,17 @@
 <body>
 <!-- Intro video screen -->
 <div id="intro-screen">
-  <video id="intro-video" playsinline preload="auto">
-    <source src="/assets/kash-intro.webm" type="video/webm">
-    <source src="/assets/kash-intro.mp4" type="video/mp4">
-  </video>
+  <div id="intro-video-wrap">
+    <video id="intro-video" playsinline preload="auto">
+      <source src="/assets/kash-intro.webm" type="video/webm">
+      <source src="/assets/kash-intro.mp4" type="video/mp4">
+    </video>
+    <div id="intro-skip">Skip intro &gt;&gt;</div>
+  </div>
   <div id="intro-loading" class="visible">
     <div id="intro-loading-bar-wrap"><div id="intro-loading-bar"></div></div>
     <div id="intro-loading-text">Loading...</div>
   </div>
-  <div id="intro-skip">Skip intro &gt;&gt;</div>
   <div id="intro-unmute"><span></span></div>
   <script>document.querySelector('#intro-unmute span').textContent = 'ontouchstart' in window ? '🔊 TAP TO UNMUTE' : '🔊 CLICK TO UNMUTE';</script>
 </div>
