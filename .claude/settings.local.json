@@ -6,7 +6,10 @@
       "Bash(mkdir:*)",
       "Bash(npx tsc:*)",
       "Bash(npx vite:*)",
-      "Bash(start:*)"
+      "Bash(start:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)"
     ]
   }
 }

@@ -909,7 +909,7 @@ export class RoadScene {
     for (const o of this.obstacles) {
       if (state.phase === 'RUNNING' || this.serverRoundRunning) {
         // Crash obstacle uses its own fixed fast speed
-        const s = o.isCrash ? 0.03 : speed;
+        const s = o.isCrash ? [0.015, 0.02, 0.025, 0.03, 0.04][state.chasePhase - 1] : speed;
         o.rz += s * (0.2 + o.rz * 1.5);
       }
       // Crash obstacle stops at Kash's position

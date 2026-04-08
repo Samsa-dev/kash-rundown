@@ -194,6 +194,41 @@ function wireControls() {
     roadScene.clearGameObjects();
   });
 
+  // Test crash timing — spawns crash obstacle and measures time to reach Kash
+  $('test-crash-timing').addEventListener('click', () => {
+    roadScene.clearGameObjects();
+    state.phase = 'RUNNING';
+    roadScene.serverRoundRunning = true;
+    const timerEl = $('crash-timer');
+
+    // Spawn crash obstacle from horizon with isCrash flag (uses fixed speed 0.03)
+    const crashObs = {
+      type: 'barricade' as any,
+      rx: roadScene.riderLane,
+      rz: 0.02,
+      speed: 0,
+      color: '#EF4444',
+      lanes: 1,
+      isCrash: true,
+    };
+    roadScene.obstacles.push(crashObs);
+
+    const startTime = Date.now();
+    timerEl.textContent = '0ms...';
+
+    const check = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      timerEl.textContent = elapsed + 'ms...';
+
+      // Check if obstacle reached clamp point (0.38)
+      if (crashObs.rz >= 0.37) {
+        clearInterval(check);
+        timerEl.textContent = elapsed + 'ms ✓';
+        roadScene.spawnCrashParticles();
+      }
+    }, 16);
+  });
+
   // Obstacle sprite controls
   ($('toggle-obs-sprites') as HTMLInputElement).addEventListener('change', (e) => {
     roadScene.useObstacleSprites = (e.target as HTMLInputElement).checked;
